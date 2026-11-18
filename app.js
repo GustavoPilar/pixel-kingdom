@@ -153,7 +153,8 @@ function spawnPrey(home,sex,age,x=home.x+(rnd(nextPreyId,21)-.5)*24,y=home.y+(rn
 }
 function createPreyPopulation(){
   const definitions=[["deer",44,31],["mouse",35,39],["mouse",64,43]];
-  definitions.forEach(([species,tileX,tileY],id)=>{const home={id,species,...nearestHabitableTile(tileX,tileY)};preyHomes.push(home);const female=spawnPrey(home,"female",preySpecies[species].maturity+8),male=spawnPrey(home,"male",preySpecies[species].maturity+10);female.mateId=male.id;male.mateId=female.id;female.cooldown=species==="deer"?28:9});
+  definitions.forEach(([species,tileX,tileY],id)=>{const home={id,species,...nearestHabitableTile(tileX,tileY)};preyHomes.push(home);const spacing=species==="deer"?24:8,female=spawnPrey(home,"female",preySpecies[species].maturity+8,home.x-spacing,home.y),male=spawnPrey(home,"male",preySpecies[species].maturity+10,home.x+spacing,home.y);female.mateId=male.id;male.mateId=female.id;female.cooldown=species==="deer"?28:9});
+  for(let index=objects.length-1;index>=0;index--){const nearbyHome=preyHomes.find(home=>Math.hypot(objects[index].x-home.x,objects[index].y-home.y)<(home.species==="deer"?75:38));if(nearbyHome)objects.splice(index,1)}
 }
 function preyHome(animal){return preyHomes.find(home=>home.id===animal.homeId)}
 function choosePreyTarget(animal){
@@ -169,8 +170,8 @@ function updatePrey(dt){
     const night=nightStrength()>.65;if(night){animal.targetX=home.x;animal.targetY=home.y}else if(animal.wanderTimer<=0)choosePreyTarget(animal);
     if(animal.sex==="female"&&animal.pregnancy>0){animal.pregnancy-=dt;if(animal.pregnancy<=0){const sameSpecies=preyAnimals.filter(candidate=>candidate.species===animal.species).length+newborns.filter(baby=>baby.home.species===animal.species).length,litter=settings.litter[0]+Math.floor(rnd(animal.id,Math.floor(animal.age),28)*(settings.litter[1]-settings.litter[0]+1));for(let i=0;i<litter&&sameSpecies+i<settings.cap;i++)newborns.push({home,sex:i%2?"male":"female",x:animal.x+i,y:animal.y});animal.cooldown=settings.cooldown}}
     const mate=preyAnimals.find(candidate=>candidate.id===animal.mateId);if(animal.sex==="female"&&animal.age>=settings.maturity&&mate&&animal.cooldown<=0&&mate.cooldown<=0&&Math.hypot(animal.x-mate.x,animal.y-mate.y)<45){animal.pregnancy=settings.gestation;animal.cooldown=settings.cooldown;mate.cooldown=settings.cooldown*.8}
-    const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);animal.hidden=night&&distance<8;
-    if(distance>3&&!animal.hidden){const juvenile=Math.min(1,animal.age/settings.maturity),speed=settings.speed*(.55+.45*juvenile)*dt,nx=animal.x+dx/distance*speed,ny=animal.y+dy/distance*speed;if(!blocked(nx,animal.y))animal.x=nx;if(!blocked(animal.x,ny))animal.y=ny;animal.hop+=dt*(animal.species==="mouse"?11:5)}else if(!night)animal.wanderTimer=0;
+    const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);animal.hidden=false;animal.resting=night&&distance<8;
+    if(distance>3&&!animal.resting){const juvenile=Math.min(1,animal.age/settings.maturity),speed=settings.speed*(.55+.45*juvenile)*dt,nx=animal.x+dx/distance*speed,ny=animal.y+dy/distance*speed;if(!blocked(nx,animal.y))animal.x=nx;if(!blocked(animal.x,ny))animal.y=ny;animal.hop+=dt*(animal.species==="mouse"?11:5)}else if(!night)animal.wanderTimer=0;
   }
   for(const baby of newborns)spawnPrey(baby.home,baby.sex,0,baby.x,baby.y);
   for(let index=preyAnimals.length-1;index>=0;index--)if(preyAnimals[index].age>preyAnimals[index].lifespan){const id=preyAnimals[index].id;preyAnimals.splice(index,1);for(const animal of preyAnimals)if(animal.mateId===id)animal.mateId=null}
@@ -192,9 +193,11 @@ function drawRabbit(rabbit){
   ctx.fillStyle="#1b2a2150";ctx.fillRect(x-w*.35,y+1,w*.7,2);ctx.drawImage(sheets.rabbit,frame*12,0,12,10,x-w/2,y-h-hop,w,h);
 }
 function drawPrey(animal){
-  const settings=preySpecies[animal.species],maturity=Math.min(1,animal.age/settings.maturity),x=Math.round(animal.x-camera.x),y=Math.round(animal.y-camera.y),frame=Math.floor(animal.hop/Math.PI*2)%4;
-  if(animal.species==="mouse"){if(animal.age<4){ctx.fillStyle="#806f64";ctx.fillRect(x,y,1,1);return}const w=Math.max(3,Math.round(9*maturity)),h=Math.max(2,Math.round(6*maturity)),hop=Math.abs(Math.sin(animal.hop))*2;ctx.drawImage(sheets.mouse,frame*7,0,7,5,x-w/2,y-h-hop,w,h);return}
-  const w=Math.max(6,Math.round(38*maturity)),h=Math.max(7,Math.round(46*maturity)),hop=Math.abs(Math.sin(animal.hop))*4;ctx.fillStyle="#1b2a2145";ctx.fillRect(x-w*.3,y+1,w*.6,3);ctx.drawImage(sheets.deer,frame*20,0,20,24,x-w/2,y-h-hop,w,h);
+  const settings=preySpecies[animal.species],maturity=Math.min(1,animal.age/settings.maturity),x=Math.round(animal.x-camera.x),y=Math.round(animal.y-camera.y),frame=animal.resting?0:Math.floor(animal.hop/Math.PI*2)%4;
+  if(animal.species==="mouse"){if(animal.age<4){ctx.fillStyle="#6e5b51";ctx.fillRect(x,y,1,1);return}const w=Math.max(3,Math.round(10*maturity)),h=Math.max(2,Math.round(7*maturity)),hop=animal.resting?0:Math.abs(Math.sin(animal.hop))*2;ctx.fillStyle="#d2b8a8";ctx.fillRect(x-w/2-3,y-2,4,1);ctx.drawImage(sheets.mouse,frame*7,0,7,5,x-w/2,y-h-hop,w,h);return}
+  const w=Math.max(7,Math.round(47*maturity)),h=Math.max(9,Math.round(56*maturity)),hop=animal.resting?0:Math.abs(Math.sin(animal.hop))*4;ctx.fillStyle="#1b2a2145";ctx.fillRect(x-w*.3,y+1,w*.6,3);
+  if(animal.sex==="male"&&maturity>.8){ctx.fillStyle="#67442f";ctx.fillRect(x+8,y-h-hop-5,2,8);ctx.fillRect(x+12,y-h-hop-8,2,10);ctx.fillRect(x+5,y-h-hop-5,5,2);ctx.fillRect(x+11,y-h-hop-8,5,2)}
+  ctx.drawImage(sheets.deer,frame*20,0,20,24,x-w/2,y-h-hop,w,h);
 }
 function drawPlayer(){
   const moving=keys.size>0||target!==null,hop=moving?Math.abs(Math.sin(player.hop))*13:0,frame=moving?Math.floor(player.hop/Math.PI*2)%4:0,x=Math.round(player.x-camera.x),y=Math.round(player.y-camera.y);
