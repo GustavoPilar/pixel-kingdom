@@ -2,7 +2,7 @@ const canvas=document.querySelector("#world"),ctx=canvas.getContext("2d");
 const minimapCanvas=document.querySelector("#minimapCanvas"),minimapCtx=minimapCanvas.getContext("2d");
 const worldMapCanvas=document.querySelector("#worldMapCanvas"),worldMapCtx=worldMapCanvas.getContext("2d");
 const TILE=32,MAP_W=84,MAP_H=64,PLAYER_SCALE=3;
-let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0;
+let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0,cycleElapsed=1.5;
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
 const terrain=[],objects=[];
 
@@ -92,12 +92,22 @@ function drawPlayer(){
 }
 function blocked(x,y){const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H||terrain[ty][tx]===4)return true;return objects.some(o=>o.solid&&Math.abs(o.x-x)<17*(o.scale||1)&&Math.abs(o.y-y)<13*(o.scale||1))}
 function update(dt){
+  cycleElapsed+=dt;
   let dx=0,dy=0;if(keys.has("w")||keys.has("arrowup"))dy--;if(keys.has("s")||keys.has("arrowdown"))dy++;if(keys.has("a")||keys.has("arrowleft"))dx--;if(keys.has("d")||keys.has("arrowright"))dx++;
   if(keys.size)target=null;
   if(target&&!dx&&!dy){const tx=target.x-player.x,ty=target.y-player.y,distance=Math.hypot(tx,ty);if(distance>6){dx=tx/distance;dy=ty/distance}else target=null}
-  if(dx||dy){const len=Math.hypot(dx,dy),beforeX=player.x,beforeY=player.y;dx/=len;dy/=len;const pace=player.speed*dt,nx=player.x+dx*pace,ny=player.y+dy*pace;if(!blocked(nx,player.y))player.x=nx;if(!blocked(player.x,ny))player.y=ny;if(target&&player.x===beforeX&&player.y===beforeY)target=null;player.hop+=dt*7;if(Math.abs(dx)>Math.abs(dy))player.dir=dx<0?1:2;else player.dir=dy<0?3:0}
+  if(dx||dy){const len=Math.hypot(dx,dy),beforeX=player.x,beforeY=player.y;dx/=len;dy/=len;const pace=player.speed*dt,nx=player.x+dx*pace,ny=player.y+dy*pace;if(!blocked(nx,player.y))player.x=nx;if(!blocked(player.x,ny))player.y=ny;if(target&&player.x===beforeX&&player.y===beforeY)target=null;player.hop+=dt*7;player.dir=0}
 }
-function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();const shown=objects.filter(o=>isVisible(o.x,o.y)).sort((a,b)=>a.y-b.y);let playerDone=false;for(const o of shown){if(!playerDone&&o.y>player.y){drawPlayer();playerDone=true}drawObject(o)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height)}
+function nightStrength(){const turn=Math.floor(cycleElapsed/10)%2,progress=cycleElapsed%10;return turn===1?Math.min(1,progress/1.5):Math.max(0,1-progress/1.5)}
+function drawNight(){
+  const strength=nightStrength();if(strength<=0)return;
+  const px=player.x-camera.x,py=player.y-camera.y;
+  const shade=ctx.createRadialGradient(px,py,45,px,py,Math.max(280,Math.min(width,height)*.62));
+  shade.addColorStop(0,`rgba(8,19,42,${.2*strength})`);shade.addColorStop(.35,`rgba(8,18,39,${.44*strength})`);shade.addColorStop(1,`rgba(5,12,31,${.72*strength})`);
+  ctx.fillStyle=shade;ctx.fillRect(0,0,width,height);
+  for(let i=0;i<24;i++){const worldX=rnd(i,4,30)*MAP_W*TILE,worldY=rnd(i,9,31)*MAP_H*TILE,x=worldX-camera.x+Math.sin(performance.now()/700+i)*5,y=worldY-camera.y+Math.cos(performance.now()/900+i*2)*3;if(x<0||y<0||x>width||y>height)continue;const flicker=.45+.55*Math.abs(Math.sin(performance.now()/360+i));ctx.fillStyle=`rgba(245,222,111,${strength*flicker})`;ctx.fillRect(Math.round(x),Math.round(y),2,2)}
+}
+function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();const shown=objects.filter(o=>isVisible(o.x,o.y)).sort((a,b)=>a.y-b.y);let playerDone=false;for(const o of shown){if(!playerDone&&o.y>player.y){drawPlayer();playerDone=true}drawObject(o)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawNight()}
 function drawMap(mapContext,mapCanvas,showCamera){
   const mw=mapCanvas.width,mh=mapCanvas.height,cellW=mw/MAP_W,cellH=mh/MAP_H,colors=["#739457","#315f40","#a39b62","#777957","#477f7d"];
   mapContext.imageSmoothingEnabled=false;mapContext.clearRect(0,0,mw,mh);
