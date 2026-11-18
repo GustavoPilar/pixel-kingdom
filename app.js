@@ -1,6 +1,8 @@
 const canvas=document.querySelector("#world"),ctx=canvas.getContext("2d");
+const minimapCanvas=document.querySelector("#minimapCanvas"),minimapCtx=minimapCanvas.getContext("2d");
+const worldMapCanvas=document.querySelector("#worldMapCanvas"),worldMapCtx=worldMapCanvas.getContext("2d");
 const TILE=32,MAP_W=84,MAP_H=64,PLAYER_SCALE=3;
-let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null;
+let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0;
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
 const terrain=[],objects=[];
 
@@ -96,12 +98,28 @@ function update(dt){
   if(dx||dy){const len=Math.hypot(dx,dy),beforeX=player.x,beforeY=player.y;dx/=len;dy/=len;const pace=player.speed*dt,nx=player.x+dx*pace,ny=player.y+dy*pace;if(!blocked(nx,player.y))player.x=nx;if(!blocked(player.x,ny))player.y=ny;if(target&&player.x===beforeX&&player.y===beforeY)target=null;player.hop+=dt*7;if(Math.abs(dx)>Math.abs(dy))player.dir=dx<0?1:2;else player.dir=dy<0?3:0}
 }
 function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();const shown=objects.filter(o=>isVisible(o.x,o.y)).sort((a,b)=>a.y-b.y);let playerDone=false;for(const o of shown){if(!playerDone&&o.y>player.y){drawPlayer();playerDone=true}drawObject(o)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height)}
-function loop(time){const dt=Math.min(.04,(time-last)/1000||0);last=time;update(dt);draw();requestAnimationFrame(loop)}
+function drawMap(mapContext,mapCanvas,showCamera){
+  const mw=mapCanvas.width,mh=mapCanvas.height,cellW=mw/MAP_W,cellH=mh/MAP_H,colors=["#739457","#315f40","#a39b62","#777957","#477f7d"];
+  mapContext.imageSmoothingEnabled=false;mapContext.clearRect(0,0,mw,mh);
+  for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++){mapContext.fillStyle=colors[terrain[y][x]];mapContext.fillRect(Math.floor(x*cellW),Math.floor(y*cellH),Math.ceil(cellW),Math.ceil(cellH))}
+  for(const object of objects){if(object.prop!==undefined&&object.prop!==0)continue;mapContext.fillStyle=object.sprite===3?"#77776d":"#203f2c";const size=Math.max(1,cellW*.7);mapContext.fillRect(object.x/(MAP_W*TILE)*mw-size/2,object.y/(MAP_H*TILE)*mh-size/2,size,size)}
+  if(target){mapContext.strokeStyle="#f7e3a2";mapContext.lineWidth=Math.max(1,mw/400);mapContext.beginPath();mapContext.arc(target.x/(MAP_W*TILE)*mw,target.y/(MAP_H*TILE)*mh,Math.max(2,mw/180),0,Math.PI*2);mapContext.stroke()}
+  if(showCamera){mapContext.strokeStyle="#fff2c8";mapContext.lineWidth=Math.max(1,mw/350);mapContext.strokeRect(camera.x/(MAP_W*TILE)*mw,camera.y/(MAP_H*TILE)*mh,Math.min(width,MAP_W*TILE)/(MAP_W*TILE)*mw,Math.min(height,MAP_H*TILE)/(MAP_H*TILE)*mh)}
+  const px=player.x/(MAP_W*TILE)*mw,py=player.y/(MAP_H*TILE)*mh;mapContext.fillStyle="#f2d57e";mapContext.beginPath();mapContext.arc(px,py,Math.max(3,mw/120),0,Math.PI*2);mapContext.fill();mapContext.strokeStyle="#342c22";mapContext.lineWidth=Math.max(1,mw/500);mapContext.stroke();
+}
+function redrawMaps(){drawMap(minimapCtx,minimapCanvas,true);if(!document.querySelector("#worldMap").classList.contains("hidden"))drawMap(worldMapCtx,worldMapCanvas,true)}
+function loop(time){const dt=Math.min(.04,(time-last)/1000||0);last=time;update(dt);draw();if(mapTick++%6===0)redrawMaps();requestAnimationFrame(loop)}
 
 addEventListener("keydown",e=>{const key=e.key.toLowerCase();if(["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(key)){keys.add(key);e.preventDefault();document.querySelector("#instructions").classList.add("hidden")}});
 addEventListener("keyup",e=>keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("pointerdown",e=>{dragging=true;moved=false;pointerStart={x:e.clientX,y:e.clientY};dragOrigin={x:e.clientX+camera.x,y:e.clientY+camera.y};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId)});
 canvas.addEventListener("pointermove",e=>{if(!dragging)return;if(Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)<5)return;moved=true;camera.x=dragOrigin.x-e.clientX;camera.y=dragOrigin.y-e.clientY;camera.x=Math.max(0,Math.min(MAP_W*TILE-width,camera.x));camera.y=Math.max(0,Math.min(MAP_H*TILE-height,camera.y));document.querySelector("#instructions").classList.add("hidden")});
 canvas.addEventListener("pointerup",e=>{if(!moved){const rect=canvas.getBoundingClientRect(),worldX=e.clientX-rect.left+camera.x,worldY=e.clientY-rect.top+camera.y;if(!blocked(worldX,worldY))target={x:worldX,y:worldY}}dragging=false;canvas.classList.remove("dragging");document.querySelector("#instructions").classList.add("hidden")});
+document.querySelector("#minimapToggle").addEventListener("click",e=>{e.stopPropagation();const minimap=document.querySelector("#minimap");minimap.classList.add("compact");document.querySelector("#minimapToggle").setAttribute("aria-label","Mapa minimizado")});
+document.querySelector("#centerPlayer").addEventListener("click",e=>{e.stopPropagation();camera.x=Math.max(0,Math.min(MAP_W*TILE-width,player.x-width/2));camera.y=Math.max(0,Math.min(MAP_H*TILE-height,player.y-height/2));redrawMaps()});
+document.querySelector("#minimapView").addEventListener("click",()=>{const minimap=document.querySelector("#minimap");if(minimap.classList.contains("compact")){minimap.classList.remove("compact");return}document.querySelector("#worldMap").classList.remove("hidden");redrawMaps()});
+document.querySelector("#closeWorldMap").addEventListener("click",()=>document.querySelector("#worldMap").classList.add("hidden"));
+document.querySelector("#worldMap").addEventListener("click",e=>{if(e.target===document.querySelector("#worldMap"))document.querySelector("#worldMap").classList.add("hidden")});
+worldMapCanvas.addEventListener("click",e=>{const rect=worldMapCanvas.getBoundingClientRect(),worldX=(e.clientX-rect.left)/rect.width*MAP_W*TILE,worldY=(e.clientY-rect.top)/rect.height*MAP_H*TILE;camera.x=Math.max(0,Math.min(MAP_W*TILE-width,worldX-width/2));camera.y=Math.max(0,Math.min(MAP_H*TILE-height,worldY-height/2));document.querySelector("#worldMap").classList.add("hidden")});
 addEventListener("resize",resize);
-createWorld();resize();camera.x=Math.max(0,player.x-width/2);camera.y=Math.max(0,player.y-height/2);canvas.focus();requestAnimationFrame(loop);
+createWorld();resize();minimapCanvas.width=174;minimapCanvas.height=174;worldMapCanvas.width=840;worldMapCanvas.height=640;camera.x=Math.max(0,player.x-width/2);camera.y=Math.max(0,player.y-height/2);redrawMaps();canvas.focus();requestAnimationFrame(loop);

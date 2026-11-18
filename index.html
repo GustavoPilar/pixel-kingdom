@@ -15,6 +15,23 @@
       <span class="keys"><b>W</b><b>A</b><b>S</b><b>D</b></span>
       <span>pule com as teclas · arraste para mover a câmera</span>
     </div>
+    <section class="minimap" id="minimap" aria-label="Minimapa">
+      <button class="minimap-toggle" id="minimapToggle" aria-label="Minimizar mapa">−</button>
+      <button class="minimap-view" id="minimapView" aria-label="Abrir mapa do mundo">
+        <canvas id="minimapCanvas"></canvas>
+        <span class="north">N</span><span class="east">E</span><span class="south">S</span><span class="west">W</span>
+        <i class="needle"></i>
+      </button>
+      <button class="center-player" id="centerPlayer" aria-label="Centralizar câmera no personagem" title="Centralizar no personagem">⌾</button>
+    </section>
+    <section class="world-map hidden" id="worldMap" aria-label="Mapa completo do mundo">
+      <div class="world-map-frame">
+        <div class="world-map-heading"><span>MAPA DO MUNDO</span><button id="closeWorldMap" aria-label="Fechar mapa">×</button></div>
+        <canvas id="worldMapCanvas" aria-label="Clique para mover a câmera até uma região"></canvas>
+        <div class="world-compass"><b>N</b><span>W</span><i></i><span>E</span><small>S</small></div>
+        <p>Clique em uma região para observá-la</p>
+      </div>
+    </section>
   </main>
   <script src="app.js"></script>
 </body>
