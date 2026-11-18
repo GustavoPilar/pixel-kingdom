@@ -7,8 +7,10 @@ let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerSta
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
 const terrain=[],objects=[],burrows=[],rabbits=[],preyHomes=[],preyAnimals=[];
 const preySpecies={
-  deer:{maturity:55,lifespan:[480,620],gestation:32,cooldown:105,litter:[1,1],speed:28,range:230,cap:8},
-  mouse:{maturity:14,lifespan:[130,185],gestation:11,cooldown:38,litter:[2,3],speed:20,range:85,cap:16}
+  deer:{maturity:55,lifespan:[480,620],gestation:32,cooldown:105,litter:[1,1],speed:28,range:230,cap:8,activeNight:false},
+  mouse:{maturity:14,lifespan:[130,185],gestation:11,cooldown:38,litter:[2,3],speed:20,range:85,cap:16,activeNight:true},
+  frog:{maturity:18,lifespan:[170,240],gestation:14,cooldown:48,litter:[2,3],speed:15,range:75,cap:10,activeNight:true},
+  moth:{maturity:10,lifespan:[95,140],gestation:9,cooldown:32,litter:[2,3],speed:24,range:110,cap:12,activeNight:true}
 };
 
 function rnd(x,y,s=0){const n=Math.sin(x*127.1+y*311.7+s*73.3)*43758.5453;return n-Math.floor(n)}
@@ -89,7 +91,17 @@ function makeMouseSheet(){
   for(let frame=0;frame<4;frame++){const x=frame*7;pixel(c,x+1,2,5,3,"#806f64");pixel(c,x+4,1,2,3,"#9a887a");pixel(c,x+5,0,1,1,"#b59e91");pixel(c,x+6,2,1,1,"#211e1d");pixel(c,x,3,2,1,"#b9a79d");if(frame%2)pixel(c,x,4,1,1,"#806f64")}
   return sheet;
 }
-const sheets={player:makePlayerSheet(),rabbit:makeRabbitSheet(),deer:makeDeerSheet(),mouse:makeMouseSheet(),nature:seasons.map((_,i)=>makeNatureSheet(i)),ground:seasons.map((_,i)=>makeGroundSheet(i)),props:seasons.map((_,i)=>makePropSheet(i))};
+function makeFrogSheet(){
+  const sheet=document.createElement("canvas");sheet.width=8*4;sheet.height=6;const c=sheet.getContext("2d");c.imageSmoothingEnabled=false;
+  for(let frame=0;frame<4;frame++){const x=frame*8,hop=frame===1||frame===3?-1:0;pixel(c,x+1,3+hop,6,3,"#4f793f");pixel(c,x+2,1+hop,4,3,"#6b984e");pixel(c,x+2,1+hop,1,1,"#d8d6a2");pixel(c,x+5,1+hop,1,1,"#d8d6a2");pixel(c,x+2,2+hop,1,1,"#20251e");pixel(c,x+5,2+hop,1,1,"#20251e");pixel(c,x,5+hop,3,1,"#395b34");pixel(c,x+5,5+hop,3,1,"#395b34")}
+  return sheet;
+}
+function makeMothSheet(){
+  const sheet=document.createElement("canvas");sheet.width=8*4;sheet.height=6;const c=sheet.getContext("2d");c.imageSmoothingEnabled=false;
+  for(let frame=0;frame<4;frame++){const x=frame*8,open=frame%2===0;pixel(c,x+3,1,2,5,"#6b5948");if(open){pixel(c,x,1,3,3,"#d1bd83");pixel(c,x+5,1,3,3,"#d1bd83");pixel(c,x+1,0,2,1,"#aa9367");pixel(c,x+5,0,2,1,"#aa9367")}else{pixel(c,x+2,2,2,3,"#c2ad78");pixel(c,x+4,2,2,3,"#c2ad78")}}
+  return sheet;
+}
+const sheets={player:makePlayerSheet(),rabbit:makeRabbitSheet(),deer:makeDeerSheet(),mouse:makeMouseSheet(),frog:makeFrogSheet(),moth:makeMothSheet(),nature:seasons.map((_,i)=>makeNatureSheet(i)),ground:seasons.map((_,i)=>makeGroundSheet(i)),props:seasons.map((_,i)=>makePropSheet(i))};
 function currentSeason(){return Math.floor(cycleElapsed/SEASON_DURATION)%seasons.length}
 function updateSeasonIndicator(){const index=currentSeason();if(index===lastSeason)return;lastSeason=index;const indicator=document.querySelector("#seasonIndicator");indicator.textContent=seasons[index].emoji;indicator.setAttribute("aria-label",seasons[index].name)}
 
@@ -152,7 +164,7 @@ function spawnPrey(home,sex,age,x=home.x+(rnd(nextPreyId,21)-.5)*24,y=home.y+(rn
   preyAnimals.push(animal);return animal;
 }
 function createPreyPopulation(){
-  const definitions=[["deer",44,31],["mouse",35,39],["mouse",64,43]];
+  const definitions=[["deer",44,31],["mouse",35,39],["mouse",64,43],["frog",58,34],["moth",31,24]];
   definitions.forEach(([species,tileX,tileY],id)=>{const home={id,species,...nearestHabitableTile(tileX,tileY)};preyHomes.push(home);const spacing=species==="deer"?24:8,female=spawnPrey(home,"female",preySpecies[species].maturity+8,home.x-spacing,home.y),male=spawnPrey(home,"male",preySpecies[species].maturity+10,home.x+spacing,home.y);female.mateId=male.id;male.mateId=female.id;female.cooldown=species==="deer"?28:9});
   for(let index=objects.length-1;index>=0;index--){const nearbyHome=preyHomes.find(home=>Math.hypot(objects[index].x-home.x,objects[index].y-home.y)<(home.species==="deer"?75:38));if(nearbyHome)objects.splice(index,1)}
 }
@@ -167,11 +179,11 @@ function pairPrey(){
 function updatePrey(dt){
   const newborns=[];pairPrey();
   for(const animal of preyAnimals){const settings=preySpecies[animal.species],home=preyHome(animal);animal.age+=dt;animal.cooldown=Math.max(0,animal.cooldown-dt);animal.wanderTimer-=dt;
-    const night=nightStrength()>.65;if(night){animal.targetX=home.x;animal.targetY=home.y}else if(animal.wanderTimer<=0)choosePreyTarget(animal);
+    const night=nightStrength()>.65,active=settings.activeNight?night:!night;if(!active){animal.targetX=home.x;animal.targetY=home.y}else if(animal.wanderTimer<=0)choosePreyTarget(animal);
     if(animal.sex==="female"&&animal.pregnancy>0){animal.pregnancy-=dt;if(animal.pregnancy<=0){const sameSpecies=preyAnimals.filter(candidate=>candidate.species===animal.species).length+newborns.filter(baby=>baby.home.species===animal.species).length,litter=settings.litter[0]+Math.floor(rnd(animal.id,Math.floor(animal.age),28)*(settings.litter[1]-settings.litter[0]+1));for(let i=0;i<litter&&sameSpecies+i<settings.cap;i++)newborns.push({home,sex:i%2?"male":"female",x:animal.x+i,y:animal.y});animal.cooldown=settings.cooldown}}
     const mate=preyAnimals.find(candidate=>candidate.id===animal.mateId);if(animal.sex==="female"&&animal.age>=settings.maturity&&mate&&animal.cooldown<=0&&mate.cooldown<=0&&Math.hypot(animal.x-mate.x,animal.y-mate.y)<45){animal.pregnancy=settings.gestation;animal.cooldown=settings.cooldown;mate.cooldown=settings.cooldown*.8}
-    const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);animal.hidden=false;animal.resting=night&&distance<8;
-    if(distance>3&&!animal.resting){const juvenile=Math.min(1,animal.age/settings.maturity),speed=settings.speed*(.55+.45*juvenile)*dt,nx=animal.x+dx/distance*speed,ny=animal.y+dy/distance*speed;if(!blocked(nx,animal.y))animal.x=nx;if(!blocked(animal.x,ny))animal.y=ny;animal.hop+=dt*(animal.species==="mouse"?11:5)}else if(!night)animal.wanderTimer=0;
+    const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);animal.hidden=false;animal.resting=!active&&distance<8;
+    if(distance>3&&!animal.resting){const juvenile=Math.min(1,animal.age/settings.maturity),speed=settings.speed*(.55+.45*juvenile)*dt,nx=animal.x+dx/distance*speed,ny=animal.y+dy/distance*speed;if(!blocked(nx,animal.y))animal.x=nx;if(!blocked(animal.x,ny))animal.y=ny;animal.hop+=dt*(animal.species==="moth"?14:animal.species==="mouse"?11:animal.species==="frog"?8:5)}else if(active)animal.wanderTimer=0;
   }
   for(const baby of newborns)spawnPrey(baby.home,baby.sex,0,baby.x,baby.y);
   for(let index=preyAnimals.length-1;index>=0;index--)if(preyAnimals[index].age>preyAnimals[index].lifespan){const id=preyAnimals[index].id;preyAnimals.splice(index,1);for(const animal of preyAnimals)if(animal.mateId===id)animal.mateId=null}
@@ -185,7 +197,7 @@ function drawTerrain(){
 }
 function drawObject(o){const season=currentSeason(),phase=performance.now()/520+o.x*.017+o.y*.011,wind=season===3?.45:season===1?2.3:1.5,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?wind*1.3:wind)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props[season],o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature[season],o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
 function drawBurrows(){for(const burrow of burrows){if(!isVisible(burrow.x,burrow.y,25))continue;const x=Math.round(burrow.x-camera.x),y=Math.round(burrow.y-camera.y);ctx.fillStyle="#806043";ctx.fillRect(x-11,y-3,22,6);ctx.fillStyle="#2b2923";ctx.fillRect(x-8,y-4,16,6);ctx.fillStyle="#171b18";ctx.fillRect(x-5,y-3,10,4);ctx.fillStyle="#a47b4c";ctx.fillRect(x-12,y+3,5,2);ctx.fillRect(x+7,y+3,7,2)}}
-function drawPreyHomes(){for(const home of preyHomes){if(!isVisible(home.x,home.y,30))continue;const x=Math.round(home.x-camera.x),y=Math.round(home.y-camera.y);if(home.species==="deer"){ctx.fillStyle="#6f6842";ctx.fillRect(x-15,y-5,30,8);ctx.fillStyle="#958557";ctx.fillRect(x-11,y-7,22,6);ctx.fillStyle="#b09a61";ctx.fillRect(x-7,y-8,14,3)}else{ctx.fillStyle="#72533c";ctx.fillRect(x-6,y-2,12,4);ctx.fillStyle="#27241f";ctx.fillRect(x-4,y-3,8,4)}}}
+function drawPreyHomes(){for(const home of preyHomes){if(!isVisible(home.x,home.y,30))continue;const x=Math.round(home.x-camera.x),y=Math.round(home.y-camera.y);if(home.species==="deer"){ctx.fillStyle="#6f6842";ctx.fillRect(x-15,y-5,30,8);ctx.fillStyle="#958557";ctx.fillRect(x-11,y-7,22,6);ctx.fillStyle="#b09a61";ctx.fillRect(x-7,y-8,14,3)}else if(home.species==="frog"){ctx.fillStyle="#334b35";ctx.fillRect(x-9,y-3,18,6);ctx.fillStyle="#58764a";ctx.fillRect(x-6,y-5,12,4);ctx.fillStyle="#26362c";ctx.fillRect(x-3,y-4,6,3)}else if(home.species==="moth"){ctx.fillStyle="#65442e";ctx.fillRect(x-5,y-12,10,14);ctx.fillStyle="#2a241f";ctx.fillRect(x-3,y-8,6,6);ctx.fillStyle="#8b633b";ctx.fillRect(x-6,y+1,12,3)}else{ctx.fillStyle="#72533c";ctx.fillRect(x-6,y-2,12,4);ctx.fillStyle="#27241f";ctx.fillRect(x-4,y-3,8,4)}}}
 function drawRabbit(rabbit){
   const x=Math.round(rabbit.x-camera.x),y=Math.round(rabbit.y-camera.y),hop=Math.abs(Math.sin(rabbit.hop))*(rabbit.age<8?1:4);
   if(rabbit.age<5){const size=rabbit.age<2?1:2;ctx.fillStyle="#9d7455";ctx.fillRect(x,y-hop,size,size);return}
@@ -195,6 +207,8 @@ function drawRabbit(rabbit){
 function drawPrey(animal){
   const settings=preySpecies[animal.species],maturity=Math.min(1,animal.age/settings.maturity),x=Math.round(animal.x-camera.x),y=Math.round(animal.y-camera.y),frame=animal.resting?0:Math.floor(animal.hop/Math.PI*2)%4;
   if(animal.species==="mouse"){if(animal.age<4){ctx.fillStyle="#6e5b51";ctx.fillRect(x,y,1,1);return}const w=Math.max(3,Math.round(10*maturity)),h=Math.max(2,Math.round(7*maturity)),hop=animal.resting?0:Math.abs(Math.sin(animal.hop))*2;ctx.fillStyle="#d2b8a8";ctx.fillRect(x-w/2-3,y-2,4,1);ctx.drawImage(sheets.mouse,frame*7,0,7,5,x-w/2,y-h-hop,w,h);return}
+  if(animal.species==="frog"){if(animal.age<5){ctx.fillStyle="#557b42";ctx.fillRect(x,y,1,1);return}const w=Math.max(3,Math.round(10*maturity)),h=Math.max(2,Math.round(8*maturity)),hop=animal.resting?0:Math.abs(Math.sin(animal.hop))*4;ctx.drawImage(sheets.frog,frame*8,0,8,6,x-w/2,y-h-hop,w,h);return}
+  if(animal.species==="moth"){if(animal.age<4){ctx.fillStyle="#ccb983";ctx.fillRect(x,y,1,1);return}const w=Math.max(3,Math.round(9*maturity)),h=Math.max(2,Math.round(7*maturity)),hover=animal.resting?0:4+Math.sin(animal.hop)*3;ctx.drawImage(sheets.moth,frame*8,0,8,6,x-w/2,y-h-hover,w,h);return}
   const w=Math.max(7,Math.round(47*maturity)),h=Math.max(9,Math.round(56*maturity)),hop=animal.resting?0:Math.abs(Math.sin(animal.hop))*4;ctx.fillStyle="#1b2a2145";ctx.fillRect(x-w*.3,y+1,w*.6,3);
   if(animal.sex==="male"&&maturity>.8){ctx.fillStyle="#67442f";ctx.fillRect(x+8,y-h-hop-5,2,8);ctx.fillRect(x+12,y-h-hop-8,2,10);ctx.fillRect(x+5,y-h-hop-5,5,2);ctx.fillRect(x+11,y-h-hop-8,5,2)}
   ctx.drawImage(sheets.deer,frame*20,0,20,24,x-w/2,y-h-hop,w,h);
@@ -245,7 +259,7 @@ function drawMap(mapContext,mapCanvas,showCamera){
   mapContext.fillStyle="#4b3527";for(const burrow of burrows)mapContext.fillRect(burrow.x/(MAP_W*TILE)*mw-1,burrow.y/(MAP_H*TILE)*mh-1,3,2);
   mapContext.fillStyle="#d8b88d";for(const rabbit of rabbits)if(!rabbit.hidden)mapContext.fillRect(rabbit.x/(MAP_W*TILE)*mw,rabbit.y/(MAP_H*TILE)*mh,Math.max(1,cellW*.35),Math.max(1,cellH*.35));
   mapContext.fillStyle="#5a4534";for(const home of preyHomes)mapContext.fillRect(home.x/(MAP_W*TILE)*mw-1,home.y/(MAP_H*TILE)*mh-1,2,2);
-  for(const animal of preyAnimals)if(!animal.hidden){mapContext.fillStyle=animal.species==="deer"?"#c59a6b":"#8c7c70";const size=animal.species==="deer"?Math.max(2,cellW*.6):1;mapContext.fillRect(animal.x/(MAP_W*TILE)*mw-size/2,animal.y/(MAP_H*TILE)*mh-size/2,size,size)}
+  for(const animal of preyAnimals)if(!animal.hidden){const colors={deer:"#c59a6b",mouse:"#8c7c70",frog:"#6d9657",moth:"#d7c68e"};mapContext.fillStyle=colors[animal.species];const size=animal.species==="deer"?Math.max(2,cellW*.6):1;mapContext.fillRect(animal.x/(MAP_W*TILE)*mw-size/2,animal.y/(MAP_H*TILE)*mh-size/2,size,size)}
   if(target){mapContext.strokeStyle="#f7e3a2";mapContext.lineWidth=Math.max(1,mw/400);mapContext.beginPath();mapContext.arc(target.x/(MAP_W*TILE)*mw,target.y/(MAP_H*TILE)*mh,Math.max(2,mw/180),0,Math.PI*2);mapContext.stroke()}
   if(showCamera){mapContext.strokeStyle="#fff2c8";mapContext.lineWidth=Math.max(1,mw/350);mapContext.strokeRect(camera.x/(MAP_W*TILE)*mw,camera.y/(MAP_H*TILE)*mh,Math.min(width,MAP_W*TILE)/(MAP_W*TILE)*mw,Math.min(height,MAP_H*TILE)/(MAP_H*TILE)*mh)}
   const px=player.x/(MAP_W*TILE)*mw,py=player.y/(MAP_H*TILE)*mh;mapContext.fillStyle="#f2d57e";mapContext.beginPath();mapContext.arc(px,py,Math.max(3,mw/120),0,Math.PI*2);mapContext.fill();mapContext.strokeStyle="#342c22";mapContext.lineWidth=Math.max(1,mw/500);mapContext.stroke();
