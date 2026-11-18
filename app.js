@@ -1,11 +1,12 @@
 const canvas=document.querySelector("#world"),ctx=canvas.getContext("2d");
 const minimapCanvas=document.querySelector("#minimapCanvas"),minimapCtx=minimapCanvas.getContext("2d");
 const worldMapCanvas=document.querySelector("#worldMapCanvas"),worldMapCtx=worldMapCanvas.getContext("2d");
-const TILE=32,MAP_W=84,MAP_H=64,PLAYER_SCALE=3,SEASON_DURATION=40;
+const TILE=32,MAP_W=120,MAP_H=90,PLAYER_SCALE=3,SEASON_DURATION=40;
 const seasons=[{name:"Primavera",emoji:"🌸"},{name:"Verão",emoji:"☀️"},{name:"Outono",emoji:"🍂"},{name:"Inverno",emoji:"❄️"}];
 let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0,cycleElapsed=81.5,lastSeason=-1,nextRabbitId=1,nextPreyId=1,nextPredatorId=1;
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
-const terrain=[],objects=[],burrows=[],rabbits=[],preyHomes=[],preyAnimals=[],predatorHomes=[],predators=[];
+const terrain=[],objects=[],burrows=[],rabbits=[],preyHomes=[],preyAnimals=[],predatorHomes=[],predators=[],aquaticAnimals=[],corals=[];
+const WATER_TILES=new Set([4,5]);
 const preySpecies={
   deer:{maturity:55,lifespan:[480,620],gestation:32,cooldown:105,litter:[1,1],speed:28,range:230,cap:8,activeNight:false},
   mouse:{maturity:14,lifespan:[130,185],gestation:11,cooldown:38,litter:[2,3],speed:20,range:85,cap:16,activeNight:true},
@@ -63,12 +64,12 @@ function makeNatureSheet(season){
   }return sheet;
 }
 function makeGroundSheet(season){
-  const sheet=document.createElement("canvas");sheet.width=32*5;sheet.height=32;const c=sheet.getContext("2d");
+  const sheet=document.createElement("canvas");sheet.width=32*10;sheet.height=32;const c=sheet.getContext("2d");
   const palettes=[
-    ["#6d934f","#436e46","#9c965c","#817d55","#427b79"],["#7f974b","#4d7240","#aa9857","#898059","#367675"],
-    ["#9a7847","#675b3d","#a07d4d","#75684e","#526f6b"],["#d7ded3","#c6d2c7","#d9d3bd","#afb4a9","#9ec1c5"]
+    ["#6d934f","#436e46","#9c965c","#817d55","#427b79","#286487","#d6bd78","#dce6e5","#617d55","#86a85b"],["#7f974b","#4d7240","#aa9857","#898059","#367675","#245e83","#dfc77e","#e8eeee","#688452","#92ad59"],
+    ["#9a7847","#675b3d","#a07d4d","#75684e","#526f6b","#315f7c","#c6a96a","#d5dfdf","#6d704b","#a18750"],["#d7ded3","#c6d2c7","#d9d3bd","#afb4a9","#9ec1c5","#527f99","#ded3a8","#eef3f1","#b9c8bb","#d5dfcf"]
   ],colors=palettes[season];
-  for(let t=0;t<5;t++){pixel(c,t*32,0,32,32,colors[t]);for(let i=0;i<13;i++){const x=t*32+Math.floor(rnd(i,t,5)*30),y=Math.floor(rnd(t,i,7)*30);const detail=t===4?(season===3?"#d8eaeb":"#6b9a8e"):season===3?"#aebbac":t===2?"#6d713f":t===3?"#646746":"#365f38";pixel(c,x,y,t===4?6:1,t===4?1:3,detail)}}
+  for(let t=0;t<10;t++){pixel(c,t*32,0,32,32,colors[t]);for(let i=0;i<13;i++){const x=t*32+Math.floor(rnd(i,t,5)*30),y=Math.floor(rnd(t,i,7)*30),water=WATER_TILES.has(t);const detail=water?(t===5?"#39779a":season===3?"#d8eaeb":"#6b9a8e"):t===6?"#b89d61":t===7?"#c7d5d5":season===3?"#aebbac":t===2?"#6d713f":t===3?"#646746":t===8?"#496946":"#365f38";pixel(c,x,y,water?6:1,water?1:3,detail)}}
   return sheet;
 }
 function makePropSheet(season){
@@ -124,22 +125,41 @@ function updateSeasonIndicator(){const index=currentSeason();if(index===lastSeas
 
 function createWorld(){
   for(let y=0;y<MAP_H;y++){terrain[y]=[];for(let x=0;x<MAP_W;x++){
-    const wet=fbm(x/18,y/18,2),elev=fbm(x/23,y/23,8),river=53+Math.sin(y*.18)*4+Math.sin(y*.055)*7;
-    let type=0;if(Math.abs(x-river)<1.25)type=4;else if(elev>.72)type=3;else if(wet>.67)type=1;else if(wet<.4)type=2;
+    const edge=Math.min(x,MAP_W-1-x,y,MAP_H-1-y),coast=edge-(4+fbm(x/14,y/14,32)*8),wet=fbm(x/24,y/24,2),elev=fbm(x/29,y/29,8);
+    const lakeA=Math.hypot((x-87)/13,(y-48)/9),lakeB=Math.hypot((x-27)/7,(y-65)/6),pond=Math.hypot((x-58)/4,(y-58)/3);
+    let type=0;
+    if(coast<0)type=edge<3?5:4;
+    else if(lakeA<1||lakeB<1||pond<1)type=lakeA<.62||lakeB<.52?5:4;
+    else if(y<17+Math.sin(x*.09)*3)type=elev>.67?3:7;
+    else if(elev>.75)type=3;
+    else if(wet>.69)type=1;
+    else if(wet<.35)type=2;
+    else if(wet>.61&&y>48)type=8;
+    else if(wet>.48&&elev<.56)type=9;
     terrain[y][x]=type;
   }}
+  const original=terrain.map(row=>row.slice());
+  for(let y=1;y<MAP_H-1;y++)for(let x=1;x<MAP_W-1;x++)if(!WATER_TILES.has(original[y][x])&&original[y][x]!==7&&original[y][x]!==3){let coastal=false;for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)if(WATER_TILES.has(original[y+oy][x+ox]))coastal=true;if(coastal)terrain[y][x]=6}
   for(let y=2;y<MAP_H-2;y++)for(let x=2;x<MAP_W-2;x++){const t=terrain[y][x],r=rnd(x,y,12);
     if(t===1&&r>.48)objects.push({sprite:r>.88?2:Math.floor(rnd(x,y,13)*2),x:x*TILE+16,y:y*TILE+25,solid:true,scale:1});
-    else if(t===0&&r>.92)objects.push({sprite:0,x:x*TILE+16,y:y*TILE+25,solid:true,scale:.9});
+    else if((t===0||t===9)&&r>.92)objects.push({sprite:0,x:x*TILE+16,y:y*TILE+25,solid:true,scale:.9});
+    else if(t===7&&r>.91)objects.push({sprite:2,x:x*TILE+16,y:y*TILE+25,solid:true,scale:.85});
     else if(t===3&&r>.79)objects.push({sprite:3,x:x*TILE+16,y:y*TILE+26,solid:true,scale:.8});
-    else if(t===0&&r>.72)objects.push({prop:r>.88?1:0,x:x*TILE+16,y:y*TILE+26,solid:false});
-    else if(t===4&&r>.86)objects.push({prop:3,x:x*TILE+16,y:y*TILE+28,solid:false});
+    else if((t===0||t===9)&&r>.72)objects.push({prop:r>.88?1:0,x:x*TILE+16,y:y*TILE+26,solid:false});
+    else if(t===4&&r>.92)objects.push({prop:3,x:x*TILE+16,y:y*TILE+28,solid:false});
     else if(t===2&&r>.88)objects.push({prop:2,x:x*TILE+16,y:y*TILE+27,solid:false});
   }
   for(let i=objects.length-1;i>=0;i--)if(Math.hypot(objects[i].x-player.x,objects[i].y-player.y)<120)objects.splice(i,1);
+  createAquaticLife();
+}
+function randomWaterTile(seed,deep=false,ocean=false){for(let attempt=0;attempt<500;attempt++){const x=2+Math.floor(rnd(seed,attempt,51)*(MAP_W-4)),y=2+Math.floor(rnd(attempt,seed,52)*(MAP_H-4)),type=terrain[y][x],nearEdge=Math.min(x,MAP_W-1-x,y,MAP_H-1-y)<13;if((deep?type===5:WATER_TILES.has(type))&&(!ocean||nearEdge))return{x:x*TILE+16,y:y*TILE+16}}return{x:16,y:16}}
+function createAquaticLife(){
+  for(let i=0;i<34;i++){const point=randomWaterTile(i+1,false);aquaticAnimals.push({species:"fish",x:point.x,y:point.y,targetX:point.x,targetY:point.y,phase:rnd(i,3,53)*10,speed:15+rnd(i,4,54)*13,color:i%3})}
+  for(let i=0;i<5;i++){const point=randomWaterTile(80+i,true,true);aquaticAnimals.push({species:"shark",x:point.x,y:point.y,targetX:point.x,targetY:point.y,phase:rnd(i,5,55)*10,speed:22+rnd(i,6,56)*8,color:0})}
+  for(let i=0;i<46;i++){const point=randomWaterTile(150+i,false),tx=Math.floor(point.x/TILE),ty=Math.floor(point.y/TILE);let nearBeach=false;for(let oy=-2;oy<=2;oy++)for(let ox=-2;ox<=2;ox++)if(terrain[ty+oy]?.[tx+ox]===6)nearBeach=true;if(nearBeach)corals.push({x:point.x,y:point.y,color:i%4,phase:rnd(i,8,57)*6})}
 }
 function nearestHabitableTile(startX,startY){
-  for(let radius=0;radius<10;radius++)for(let y=startY-radius;y<=startY+radius;y++)for(let x=startX-radius;x<=startX+radius;x++)if(terrain[y]?.[x]!==undefined&&terrain[y][x]!==4&&terrain[y][x]!==3)return{x:x*TILE+16,y:y*TILE+20};
+  for(let radius=0;radius<15;radius++)for(let y=startY-radius;y<=startY+radius;y++)for(let x=startX-radius;x<=startX+radius;x++)if(terrain[y]?.[x]!==undefined&&!WATER_TILES.has(terrain[y][x])&&terrain[y][x]!==3)return{x:x*TILE+16,y:y*TILE+20};
   return{x:startX*TILE+16,y:startY*TILE+20};
 }
 function spawnRabbit(home,sex,age=24,x=home.x+(rnd(nextRabbitId,1)-.5)*35,y=home.y+(rnd(nextRabbitId,2)-.5)*35){
@@ -247,7 +267,7 @@ function isVisible(x,y,pad=90){return x>camera.x-pad&&x<camera.x+width+pad&&y>ca
 function drawTerrain(){
   const sx=Math.max(0,Math.floor(camera.x/TILE)-1),ex=Math.min(MAP_W,Math.ceil((camera.x+width)/TILE)+1),sy=Math.max(0,Math.floor(camera.y/TILE)-1),ey=Math.min(MAP_H,Math.ceil((camera.y+height)/TILE)+1);
   const season=currentSeason(),wind=Math.floor(performance.now()/(season===3?500:season===1?190:260));
-  for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const type=terrain[y][x],dx=Math.round(x*TILE-camera.x),dy=Math.round(y*TILE-camera.y);ctx.drawImage(sheets.ground[season],type*32,0,32,32,dx,dy,32,32);if(type===4){const shift=Math.floor(performance.now()/(season===3?650:180)+x*3+y*5)%8;ctx.fillStyle=season===3?"#e1f0ef":"#80aca1";ctx.fillRect(dx+shift,dy+8,9,1);ctx.fillRect(dx+(shift+14)%25,dy+23,7,1)}else if(type!==3&&season!==3){const sway=(wind+x+y)%3-1;ctx.fillStyle=season===2?"#8b6238":type===2?"#77763f":"#3c6b3d";ctx.fillRect(dx+8+sway,dy+10,1,5);ctx.fillRect(dx+23-sway,dy+25,1,4)}}
+  for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const type=terrain[y][x],dx=Math.round(x*TILE-camera.x),dy=Math.round(y*TILE-camera.y);ctx.drawImage(sheets.ground[season],type*32,0,32,32,dx,dy,32,32);if(WATER_TILES.has(type)){const shift=Math.floor(performance.now()/(season===3?650:180)+x*3+y*5)%8;ctx.fillStyle=type===5?"#4a86a4":season===3?"#e1f0ef":"#80aca1";ctx.fillRect(dx+shift,dy+8,9,1);ctx.fillRect(dx+(shift+14)%25,dy+23,7,1)}else if(type!==3&&type!==6&&type!==7&&season!==3){const sway=(wind+x+y)%3-1;ctx.fillStyle=season===2?"#8b6238":type===2?"#77763f":type===8?"#496849":"#3c6b3d";ctx.fillRect(dx+8+sway,dy+10,1,5);ctx.fillRect(dx+23-sway,dy+25,1,4)}}
 }
 function drawObject(o){const season=currentSeason(),phase=performance.now()/520+o.x*.017+o.y*.011,wind=season===3?.45:season===1?2.3:1.5,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?wind*1.3:wind)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props[season],o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature[season],o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
 function drawBurrows(){for(const burrow of burrows){if(!isVisible(burrow.x,burrow.y,25))continue;const x=Math.round(burrow.x-camera.x),y=Math.round(burrow.y-camera.y);ctx.fillStyle="#806043";ctx.fillRect(x-11,y-3,22,6);ctx.fillStyle="#2b2923";ctx.fillRect(x-8,y-4,16,6);ctx.fillStyle="#171b18";ctx.fillRect(x-5,y-3,10,4);ctx.fillStyle="#a47b4c";ctx.fillRect(x-12,y+3,5,2);ctx.fillRect(x+7,y+3,7,2)}}
@@ -274,12 +294,22 @@ function drawPredator(predator){
   const w=Math.max(4,Math.round(settings.size[0]*maturity)),h=Math.max(3,Math.round(settings.size[1]*maturity)),frame=predator.resting?0:Math.floor(predator.hop/Math.PI*2)%4,flight=predator.species==="bat"||predator.species==="owl",hop=predator.resting?0:flight?5+Math.sin(predator.hop)*3:Math.abs(Math.sin(predator.hop))*3;
   ctx.fillStyle="#15221c55";ctx.fillRect(x-w*.3,y+1,w*.6,2);ctx.drawImage(sheets.predators[predator.species],frame*16,0,16,12,x-w/2,y-h-hop,w,h);
 }
+function updateAquaticLife(dt){
+  for(const animal of aquaticAnimals){animal.phase-=dt;const deep=animal.species==="shark";if(animal.phase<=0||Math.hypot(animal.targetX-animal.x,animal.targetY-animal.y)<5){const tx=Math.floor(animal.x/TILE),ty=Math.floor(animal.y/TILE),angle=rnd(tx,ty,Math.floor(performance.now()/2500)+animal.color)*Math.PI*2,distance=deep?90:55;animal.targetX=animal.x+Math.cos(angle)*distance;animal.targetY=animal.y+Math.sin(angle)*distance;const tile=terrain[Math.floor(animal.targetY/TILE)]?.[Math.floor(animal.targetX/TILE)];if(!(deep?tile===5:WATER_TILES.has(tile))){animal.targetX=animal.x;animal.targetY=animal.y}animal.phase=2+rnd(tx,ty,61)*4}
+    const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);if(distance>2){animal.flip=dx<0;animal.x+=dx/distance*animal.speed*dt;animal.y+=dy/distance*animal.speed*dt}
+  }
+}
+function drawAquaticLife(){
+  const coralColors=["#ef7c72","#edb85c","#b984c7","#70c6a1"],fishColors=["#f0c75e","#df8161","#79c4bd"],time=performance.now()/450;
+  for(const coral of corals){if(!isVisible(coral.x,coral.y,20))continue;const x=Math.round(coral.x-camera.x),y=Math.round(coral.y-camera.y),sway=Math.round(Math.sin(time+coral.phase));ctx.fillStyle="#365f63";ctx.fillRect(x-5,y+2,11,2);ctx.fillStyle=coralColors[coral.color];ctx.fillRect(x+sway,y-7,2,10);ctx.fillRect(x-4+sway,y-4,2,7);ctx.fillRect(x+4+sway,y-5,2,8);ctx.fillRect(x-3+sway,y-6,4,2);ctx.fillRect(x+3+sway,y-8,4,2)}
+  for(const animal of aquaticAnimals){if(!isVisible(animal.x,animal.y,35))continue;const x=Math.round(animal.x-camera.x),y=Math.round(animal.y-camera.y+Math.sin(time+animal.phase)*2),dir=animal.flip?-1:1;if(animal.species==="shark"){ctx.fillStyle="#284f68";ctx.fillRect(x-13,y-4,24,9);ctx.fillRect(x+dir*10,y-2,dir*7,5);ctx.fillRect(x-dir*12,y-6,dir*6,3);ctx.fillStyle="#47758b";ctx.fillRect(x-3,y-9,7,6);ctx.fillStyle="#e6e9df";ctx.fillRect(x+dir*8,y-1,2,1)}else{ctx.fillStyle=fishColors[animal.color];ctx.fillRect(x-5,y-3,10,6);ctx.fillRect(x-dir*8,y-4,dir*4,8);ctx.fillStyle="#f4e6b5";ctx.fillRect(x+dir*3,y-1,2,2);ctx.fillStyle="#21343c";ctx.fillRect(x+dir*4,y-1,1,1)}}
+}
 function drawPlayer(){
   const moving=keys.size>0||target!==null,hop=moving?Math.abs(Math.sin(player.hop))*13:0,frame=moving?Math.floor(player.hop/Math.PI*2)%4:0,x=Math.round(player.x-camera.x),y=Math.round(player.y-camera.y);
   ctx.fillStyle=`rgba(18,35,28,${.3-hop/90})`;ctx.fillRect(x-15+hop*.22,y+6,30-hop*.44,6);
   ctx.drawImage(sheets.player,frame*16,player.dir*24,16,24,x-24,y-72-hop,48,72);
 }
-function blocked(x,y){const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H||terrain[ty][tx]===4)return true;return objects.some(o=>o.solid&&Math.abs(o.x-x)<17*(o.scale||1)&&Math.abs(o.y-y)<13*(o.scale||1))}
+function blocked(x,y){const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H||WATER_TILES.has(terrain[ty][tx]))return true;return objects.some(o=>o.solid&&Math.abs(o.x-x)<17*(o.scale||1)&&Math.abs(o.y-y)<13*(o.scale||1))}
 function update(dt){
   cycleElapsed+=dt;
   updateSeasonIndicator();
@@ -290,6 +320,7 @@ function update(dt){
   updateRabbits(dt);
   updatePrey(dt);
   updatePredators(dt);
+  updateAquaticLife(dt);
 }
 function nightStrength(){const turn=Math.floor(cycleElapsed/10)%2,progress=cycleElapsed%10;return turn===1?Math.min(1,progress/1.5):Math.max(0,1-progress/1.5)}
 function drawNight(){
@@ -309,11 +340,11 @@ function drawSeasonParticles(){
     else{ctx.fillStyle="#f4f7f2cc";ctx.fillRect(Math.round(x+Math.sin(time+i)*7),Math.round(y),2,2)}
   }
 }
-function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();drawBurrows();drawPreyHomes();drawPredatorHomes();const shown=[...objects.filter(o=>isVisible(o.x,o.y)).map(data=>({kind:"object",data})),...rabbits.filter(rabbit=>!rabbit.hidden&&isVisible(rabbit.x,rabbit.y)).map(data=>({kind:"rabbit",data})),...preyAnimals.filter(animal=>!animal.hidden&&isVisible(animal.x,animal.y)).map(data=>({kind:"prey",data})),...predators.filter(predator=>!predator.hidden&&isVisible(predator.x,predator.y)).map(data=>({kind:"predator",data}))].sort((a,b)=>a.data.y-b.data.y);let playerDone=false;for(const item of shown){if(!playerDone&&item.data.y>player.y){drawPlayer();playerDone=true}if(item.kind==="rabbit")drawRabbit(item.data);else if(item.kind==="prey")drawPrey(item.data);else if(item.kind==="predator")drawPredator(item.data);else drawObject(item.data)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawSeasonParticles();drawNight()}
+function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();drawAquaticLife();drawBurrows();drawPreyHomes();drawPredatorHomes();const shown=[...objects.filter(o=>isVisible(o.x,o.y)).map(data=>({kind:"object",data})),...rabbits.filter(rabbit=>!rabbit.hidden&&isVisible(rabbit.x,rabbit.y)).map(data=>({kind:"rabbit",data})),...preyAnimals.filter(animal=>!animal.hidden&&isVisible(animal.x,animal.y)).map(data=>({kind:"prey",data})),...predators.filter(predator=>!predator.hidden&&isVisible(predator.x,predator.y)).map(data=>({kind:"predator",data}))].sort((a,b)=>a.data.y-b.data.y);let playerDone=false;for(const item of shown){if(!playerDone&&item.data.y>player.y){drawPlayer();playerDone=true}if(item.kind==="rabbit")drawRabbit(item.data);else if(item.kind==="prey")drawPrey(item.data);else if(item.kind==="predator")drawPredator(item.data);else drawObject(item.data)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawSeasonParticles();drawNight()}
 function drawMap(mapContext,mapCanvas,showCamera){
   const mapPalettes=[
-    ["#739457","#315f40","#a39b62","#777957","#477f7d"],["#879950","#3c673b","#ac995b","#817957","#3f7775"],
-    ["#9b7949","#6b4c35","#a08051","#746950","#536f6b"],["#d8dfd5","#c4d0c5","#d8d1bc","#afb4aa","#9fc3c6"]
+    ["#739457","#315f40","#a39b62","#777957","#477f7d","#245d82","#d9c27d","#e4eceb","#577354","#88a95e"],["#879950","#3c673b","#ac995b","#817957","#3f7775","#205a80","#e0c982","#edf2f1","#5d7951","#92ae60"],
+    ["#9b7949","#6b4c35","#a08051","#746950","#536f6b","#2c5c7b","#c7a96c","#dbe4e3","#686d4c","#a38954"],["#d8dfd5","#c4d0c5","#d8d1bc","#afb4aa","#9fc3c6","#4d7d98","#ddd1a5","#f0f4f2","#b8c6b7","#d5dfd0"]
   ],mw=mapCanvas.width,mh=mapCanvas.height,cellW=mw/MAP_W,cellH=mh/MAP_H,colors=mapPalettes[currentSeason()];
   mapContext.imageSmoothingEnabled=false;mapContext.clearRect(0,0,mw,mh);
   for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++){mapContext.fillStyle=colors[terrain[y][x]];mapContext.fillRect(Math.floor(x*cellW),Math.floor(y*cellH),Math.ceil(cellW),Math.ceil(cellH))}
@@ -324,6 +355,7 @@ function drawMap(mapContext,mapCanvas,showCamera){
   for(const animal of preyAnimals)if(!animal.hidden){const colors={deer:"#c59a6b",mouse:"#8c7c70",frog:"#6d9657",moth:"#d7c68e"};mapContext.fillStyle=colors[animal.species];const size=animal.species==="deer"?Math.max(2,cellW*.6):1;mapContext.fillRect(animal.x/(MAP_W*TILE)*mw-size/2,animal.y/(MAP_H*TILE)*mh-size/2,size,size)}
   mapContext.fillStyle="#3a2521";for(const home of predatorHomes)mapContext.fillRect(home.x/(MAP_W*TILE)*mw-1,home.y/(MAP_H*TILE)*mh-1,3,2);
   for(const predator of predators)if(!predator.hidden){mapContext.fillStyle="#b55338";const size=predator.species==="wolf"?Math.max(2,cellW*.65):Math.max(1,cellW*.45);mapContext.fillRect(predator.x/(MAP_W*TILE)*mw-size/2,predator.y/(MAP_H*TILE)*mh-size/2,size,size)}
+  for(const animal of aquaticAnimals){mapContext.fillStyle=animal.species==="shark"?"#b9d3dc":"#f1cf67";const size=animal.species==="shark"?Math.max(2,cellW*.7):Math.max(1,cellW*.3);mapContext.fillRect(animal.x/(MAP_W*TILE)*mw-size/2,animal.y/(MAP_H*TILE)*mh-size/2,size,size)}
   if(target){mapContext.strokeStyle="#f7e3a2";mapContext.lineWidth=Math.max(1,mw/400);mapContext.beginPath();mapContext.arc(target.x/(MAP_W*TILE)*mw,target.y/(MAP_H*TILE)*mh,Math.max(2,mw/180),0,Math.PI*2);mapContext.stroke()}
   if(showCamera){mapContext.strokeStyle="#fff2c8";mapContext.lineWidth=Math.max(1,mw/350);mapContext.strokeRect(camera.x/(MAP_W*TILE)*mw,camera.y/(MAP_H*TILE)*mh,Math.min(width,MAP_W*TILE)/(MAP_W*TILE)*mw,Math.min(height,MAP_H*TILE)/(MAP_H*TILE)*mh)}
   const px=player.x/(MAP_W*TILE)*mw,py=player.y/(MAP_H*TILE)*mh;mapContext.fillStyle="#f2d57e";mapContext.beginPath();mapContext.arc(px,py,Math.max(3,mw/120),0,Math.PI*2);mapContext.fill();mapContext.strokeStyle="#342c22";mapContext.lineWidth=Math.max(1,mw/500);mapContext.stroke();
