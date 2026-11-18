@@ -1,8 +1,9 @@
 const canvas=document.querySelector("#world"),ctx=canvas.getContext("2d");
 const minimapCanvas=document.querySelector("#minimapCanvas"),minimapCtx=minimapCanvas.getContext("2d");
 const worldMapCanvas=document.querySelector("#worldMapCanvas"),worldMapCtx=worldMapCanvas.getContext("2d");
-const TILE=32,MAP_W=84,MAP_H=64,PLAYER_SCALE=3;
-let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0,cycleElapsed=1.5;
+const TILE=32,MAP_W=84,MAP_H=64,PLAYER_SCALE=3,SEASON_DURATION=40;
+const seasons=[{name:"Primavera",emoji:"🌸"},{name:"Verão",emoji:"☀️"},{name:"Outono",emoji:"🍂"},{name:"Inverno",emoji:"❄️"}];
+let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0,cycleElapsed=1.5,lastSeason=-1;
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
 const terrain=[],objects=[];
 
@@ -33,33 +34,43 @@ function makePlayerSheet(){
   }
   return sheet;
 }
-function makeNatureSheet(){
+function makeNatureSheet(season){
   const sheet=document.createElement("canvas");sheet.width=32*4;sheet.height=48;
   const c=sheet.getContext("2d");c.imageSmoothingEnabled=false;
   for(let type=0;type<4;type++){const x=type*32;
     if(type<3){
       pixel(c,x+13,26,7,18,type===2?"#5a3d2a":"#65442d");pixel(c,x+11,37,11,4,"#4c3828");
-      const dark=type===2?"#234c39":"#285638",mid=type===1?"#467a46":"#376d42",light=type===1?"#6a9854":"#56864b";
+      const palettes=[
+        ["#285638","#467a46","#6a9854"],["#234f34","#3f7040","#5f8847"],
+        ["#5b3829","#9a5530","#d18a3e"],["#314b3d","#637265","#dce3d9"]
+      ],palette=palettes[season],dark=type===2&&season!==2?"#234c39":palette[0],mid=palette[1],light=palette[2];
       if(type===2){for(let i=0;i<3;i++){c.fillStyle=dark;c.beginPath();c.moveTo(x+16,2+i*9);c.lineTo(x+3+i,29+i*5);c.lineTo(x+29-i,29+i*5);c.fill()}pixel(c,x+12,10,5,3,light)}
-      else{pixel(c,x+7,10,19,21,dark);pixel(c,x+3,16,25,12,dark);pixel(c,x+10,4,14,22,mid);pixel(c,x+4,19,8,7,mid);pixel(c,x+15,7,8,6,light);pixel(c,x+8,13,5,4,light)}
+      else{pixel(c,x+7,10,19,21,dark);pixel(c,x+3,16,25,12,dark);pixel(c,x+10,4,14,22,mid);pixel(c,x+4,19,8,7,mid);pixel(c,x+15,7,8,6,light);pixel(c,x+8,13,5,4,light);if(season===0){pixel(c,x+6,15,2,2,"#e7a9c0");pixel(c,x+23,19,2,2,"#f1c2d0")}if(season===3){pixel(c,x+6,12,8,3,"#edf1e8");pixel(c,x+19,17,7,3,"#edf1e8")}}
     }else{pixel(c,x+6,31,20,5,"#505653");pixel(c,x+9,23,15,9,"#74766d");pixel(c,x+12,20,9,5,"#969587");pixel(c,x+10,24,5,3,"#aaa899")}
   }return sheet;
 }
-function makeGroundSheet(){
+function makeGroundSheet(season){
   const sheet=document.createElement("canvas");sheet.width=32*5;sheet.height=32;const c=sheet.getContext("2d");
-  const colors=["#62884b","#3f6843","#98905a","#817d55","#427b79"];
-  for(let t=0;t<5;t++){pixel(c,t*32,0,32,32,colors[t]);for(let i=0;i<13;i++){const x=t*32+Math.floor(rnd(i,t,5)*30),y=Math.floor(rnd(t,i,7)*30);const detail=t===4?"#6b9a8e":t===2?"#6d713f":t===3?"#646746":"#365f38";pixel(c,x,y,t===4?6:1,t===4?1:3,detail)}}
+  const palettes=[
+    ["#6d934f","#436e46","#9c965c","#817d55","#427b79"],["#7f974b","#4d7240","#aa9857","#898059","#367675"],
+    ["#9a7847","#675b3d","#a07d4d","#75684e","#526f6b"],["#d7ded3","#c6d2c7","#d9d3bd","#afb4a9","#9ec1c5"]
+  ],colors=palettes[season];
+  for(let t=0;t<5;t++){pixel(c,t*32,0,32,32,colors[t]);for(let i=0;i<13;i++){const x=t*32+Math.floor(rnd(i,t,5)*30),y=Math.floor(rnd(t,i,7)*30);const detail=t===4?(season===3?"#d8eaeb":"#6b9a8e"):season===3?"#aebbac":t===2?"#6d713f":t===3?"#646746":"#365f38";pixel(c,x,y,t===4?6:1,t===4?1:3,detail)}}
   return sheet;
 }
-function makePropSheet(){
+function makePropSheet(season){
   const sheet=document.createElement("canvas");sheet.width=16*4;sheet.height=16;const c=sheet.getContext("2d");
-  pixel(c,1,9,14,5,"#315d38");pixel(c,4,5,6,7,"#477d42");pixel(c,9,7,5,6,"#568c4b");
-  pixel(c,19,12,1,4,"#32633b");pixel(c,18,9,3,3,"#e9ca5c");pixel(c,25,11,1,5,"#32633b");pixel(c,24,8,3,3,"#d997b2");
+  const bush=season===2?["#68452f","#9a6238","#b4773e"]:season===3?["#52665a","#dce4db","#edf2ec"]:["#315d38","#477d42","#568c4b"];
+  pixel(c,1,9,14,5,bush[0]);pixel(c,4,5,6,7,bush[1]);pixel(c,9,7,5,6,bush[2]);
+  const bloom=season===0?["#f0cf69","#e4a4bf"]:season===2?["#d1843c","#a85632"]:season===3?["#e8eee7","#cad9dc"]:["#e4bd4f","#d8899f"];
+  pixel(c,19,12,1,4,"#32633b");pixel(c,18,9,3,3,bloom[0]);pixel(c,25,11,1,5,"#32633b");pixel(c,24,8,3,3,bloom[1]);
   for(let i=0;i<4;i++){pixel(c,34+i*3,12-i%2*3,1,4+i%2*3,"#426c3d");pixel(c,35+i*3,10-i%2*3,1,2,"#6f9555")}
   pixel(c,50,11,14,3,"#536d4b");pixel(c,52,5,1,7,"#638358");pixel(c,57,3,1,9,"#638358");pixel(c,62,6,1,6,"#638358");
   return sheet;
 }
-const sheets={player:makePlayerSheet(),nature:makeNatureSheet(),ground:makeGroundSheet(),props:makePropSheet()};
+const sheets={player:makePlayerSheet(),nature:seasons.map((_,i)=>makeNatureSheet(i)),ground:seasons.map((_,i)=>makeGroundSheet(i)),props:seasons.map((_,i)=>makePropSheet(i))};
+function currentSeason(){return Math.floor(cycleElapsed/SEASON_DURATION)%seasons.length}
+function updateSeasonIndicator(){const index=currentSeason();if(index===lastSeason)return;lastSeason=index;const indicator=document.querySelector("#seasonIndicator");indicator.textContent=seasons[index].emoji;indicator.setAttribute("aria-label",seasons[index].name)}
 
 function createWorld(){
   for(let y=0;y<MAP_H;y++){terrain[y]=[];for(let x=0;x<MAP_W;x++){
@@ -81,10 +92,10 @@ function resize(){dpr=Math.min(devicePixelRatio,2);width=innerWidth;height=inner
 function isVisible(x,y,pad=90){return x>camera.x-pad&&x<camera.x+width+pad&&y>camera.y-pad&&y<camera.y+height+pad}
 function drawTerrain(){
   const sx=Math.max(0,Math.floor(camera.x/TILE)-1),ex=Math.min(MAP_W,Math.ceil((camera.x+width)/TILE)+1),sy=Math.max(0,Math.floor(camera.y/TILE)-1),ey=Math.min(MAP_H,Math.ceil((camera.y+height)/TILE)+1);
-  const wind=Math.floor(performance.now()/260);
-  for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const type=terrain[y][x],dx=Math.round(x*TILE-camera.x),dy=Math.round(y*TILE-camera.y);ctx.drawImage(sheets.ground,type*32,0,32,32,dx,dy,32,32);if(type===4){const shift=Math.floor(performance.now()/180+x*3+y*5)%8;ctx.fillStyle="#80aca1";ctx.fillRect(dx+shift,dy+8,9,1);ctx.fillRect(dx+(shift+14)%25,dy+23,7,1)}else if(type!==3){const sway=(wind+x+y)%3-1;ctx.fillStyle=type===2?"#77763f":"#3c6b3d";ctx.fillRect(dx+8+sway,dy+10,1,5);ctx.fillRect(dx+23-sway,dy+25,1,4)}}
+  const season=currentSeason(),wind=Math.floor(performance.now()/(season===3?500:season===1?190:260));
+  for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const type=terrain[y][x],dx=Math.round(x*TILE-camera.x),dy=Math.round(y*TILE-camera.y);ctx.drawImage(sheets.ground[season],type*32,0,32,32,dx,dy,32,32);if(type===4){const shift=Math.floor(performance.now()/(season===3?650:180)+x*3+y*5)%8;ctx.fillStyle=season===3?"#e1f0ef":"#80aca1";ctx.fillRect(dx+shift,dy+8,9,1);ctx.fillRect(dx+(shift+14)%25,dy+23,7,1)}else if(type!==3&&season!==3){const sway=(wind+x+y)%3-1;ctx.fillStyle=season===2?"#8b6238":type===2?"#77763f":"#3c6b3d";ctx.fillRect(dx+8+sway,dy+10,1,5);ctx.fillRect(dx+23-sway,dy+25,1,4)}}
 }
-function drawObject(o){const phase=performance.now()/520+o.x*.017+o.y*.011,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?2:1.5)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props,o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature,o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
+function drawObject(o){const season=currentSeason(),phase=performance.now()/520+o.x*.017+o.y*.011,wind=season===3?.45:season===1?2.3:1.5,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?wind*1.3:wind)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props[season],o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature[season],o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
 function drawPlayer(){
   const moving=keys.size>0||target!==null,hop=moving?Math.abs(Math.sin(player.hop))*13:0,frame=moving?Math.floor(player.hop/Math.PI*2)%4:0,x=Math.round(player.x-camera.x),y=Math.round(player.y-camera.y);
   ctx.fillStyle=`rgba(18,35,28,${.3-hop/90})`;ctx.fillRect(x-15+hop*.22,y+6,30-hop*.44,6);
@@ -93,6 +104,7 @@ function drawPlayer(){
 function blocked(x,y){const tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H||terrain[ty][tx]===4)return true;return objects.some(o=>o.solid&&Math.abs(o.x-x)<17*(o.scale||1)&&Math.abs(o.y-y)<13*(o.scale||1))}
 function update(dt){
   cycleElapsed+=dt;
+  updateSeasonIndicator();
   let dx=0,dy=0;if(keys.has("w")||keys.has("arrowup"))dy--;if(keys.has("s")||keys.has("arrowdown"))dy++;if(keys.has("a")||keys.has("arrowleft"))dx--;if(keys.has("d")||keys.has("arrowright"))dx++;
   if(keys.size)target=null;
   if(target&&!dx&&!dy){const tx=target.x-player.x,ty=target.y-player.y,distance=Math.hypot(tx,ty);if(distance>6){dx=tx/distance;dy=ty/distance}else target=null}
@@ -107,9 +119,21 @@ function drawNight(){
   ctx.fillStyle=shade;ctx.fillRect(0,0,width,height);
   for(let i=0;i<24;i++){const worldX=rnd(i,4,30)*MAP_W*TILE,worldY=rnd(i,9,31)*MAP_H*TILE,x=worldX-camera.x+Math.sin(performance.now()/700+i)*5,y=worldY-camera.y+Math.cos(performance.now()/900+i*2)*3;if(x<0||y<0||x>width||y>height)continue;const flicker=.45+.55*Math.abs(Math.sin(performance.now()/360+i));ctx.fillStyle=`rgba(245,222,111,${strength*flicker})`;ctx.fillRect(Math.round(x),Math.round(y),2,2)}
 }
-function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();const shown=objects.filter(o=>isVisible(o.x,o.y)).sort((a,b)=>a.y-b.y);let playerDone=false;for(const o of shown){if(!playerDone&&o.y>player.y){drawPlayer();playerDone=true}drawObject(o)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawNight()}
+function drawSeasonParticles(){
+  const season=currentSeason(),count=season===3?48:season===1?15:28,time=performance.now()/1000;
+  for(let i=0;i<count;i++){let x=(rnd(i,2,42)*width+time*(season===3?11:season===2?34:18)+i*17)%width,y=(rnd(i,7,43)*height+time*(season===3?42:season===2?25:12)+i*11)%height;
+    if(season===0){ctx.fillStyle=i%2?"#f2b8cc":"#f8d5df";ctx.fillRect(Math.round(x+Math.sin(time+i)*5),Math.round(y),2,2)}
+    else if(season===1){ctx.fillStyle="#f2d87899";ctx.fillRect(Math.round(x),Math.round(y+Math.sin(time+i)*4),1,1)}
+    else if(season===2){ctx.fillStyle=i%2?"#d67c36":"#a94e2f";ctx.fillRect(Math.round(x+Math.sin(time*2+i)*8),Math.round(y),3,2)}
+    else{ctx.fillStyle="#f4f7f2cc";ctx.fillRect(Math.round(x+Math.sin(time+i)*7),Math.round(y),2,2)}
+  }
+}
+function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();const shown=objects.filter(o=>isVisible(o.x,o.y)).sort((a,b)=>a.y-b.y);let playerDone=false;for(const o of shown){if(!playerDone&&o.y>player.y){drawPlayer();playerDone=true}drawObject(o)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawSeasonParticles();drawNight()}
 function drawMap(mapContext,mapCanvas,showCamera){
-  const mw=mapCanvas.width,mh=mapCanvas.height,cellW=mw/MAP_W,cellH=mh/MAP_H,colors=["#739457","#315f40","#a39b62","#777957","#477f7d"];
+  const mapPalettes=[
+    ["#739457","#315f40","#a39b62","#777957","#477f7d"],["#879950","#3c673b","#ac995b","#817957","#3f7775"],
+    ["#9b7949","#6b4c35","#a08051","#746950","#536f6b"],["#d8dfd5","#c4d0c5","#d8d1bc","#afb4aa","#9fc3c6"]
+  ],mw=mapCanvas.width,mh=mapCanvas.height,cellW=mw/MAP_W,cellH=mh/MAP_H,colors=mapPalettes[currentSeason()];
   mapContext.imageSmoothingEnabled=false;mapContext.clearRect(0,0,mw,mh);
   for(let y=0;y<MAP_H;y++)for(let x=0;x<MAP_W;x++){mapContext.fillStyle=colors[terrain[y][x]];mapContext.fillRect(Math.floor(x*cellW),Math.floor(y*cellH),Math.ceil(cellW),Math.ceil(cellH))}
   for(const object of objects){if(object.prop!==undefined&&object.prop!==0)continue;mapContext.fillStyle=object.sprite===3?"#77776d":"#203f2c";const size=Math.max(1,cellW*.7);mapContext.fillRect(object.x/(MAP_W*TILE)*mw-size/2,object.y/(MAP_H*TILE)*mh-size/2,size,size)}
@@ -132,4 +156,4 @@ document.querySelector("#closeWorldMap").addEventListener("click",()=>document.q
 document.querySelector("#worldMap").addEventListener("click",e=>{if(e.target===document.querySelector("#worldMap"))document.querySelector("#worldMap").classList.add("hidden")});
 worldMapCanvas.addEventListener("click",e=>{const rect=worldMapCanvas.getBoundingClientRect(),worldX=(e.clientX-rect.left)/rect.width*MAP_W*TILE,worldY=(e.clientY-rect.top)/rect.height*MAP_H*TILE;camera.x=Math.max(0,Math.min(MAP_W*TILE-width,worldX-width/2));camera.y=Math.max(0,Math.min(MAP_H*TILE-height,worldY-height/2));document.querySelector("#worldMap").classList.add("hidden")});
 addEventListener("resize",resize);
-createWorld();resize();minimapCanvas.width=174;minimapCanvas.height=174;worldMapCanvas.width=840;worldMapCanvas.height=640;camera.x=Math.max(0,player.x-width/2);camera.y=Math.max(0,player.y-height/2);redrawMaps();canvas.focus();requestAnimationFrame(loop);
+createWorld();resize();minimapCanvas.width=174;minimapCanvas.height=174;worldMapCanvas.width=840;worldMapCanvas.height=640;camera.x=Math.max(0,player.x-width/2);camera.y=Math.max(0,player.y-height/2);updateSeasonIndicator();redrawMaps();canvas.focus();requestAnimationFrame(loop);
