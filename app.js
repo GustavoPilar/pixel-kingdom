@@ -1,7 +1,7 @@
 const canvas=document.querySelector("#world"),ctx=canvas.getContext("2d");
 const minimapCanvas=document.querySelector("#minimapCanvas"),minimapCtx=minimapCanvas.getContext("2d");
 const worldMapCanvas=document.querySelector("#worldMapCanvas"),worldMapCtx=worldMapCanvas.getContext("2d");
-const TILE=32,MAP_W=120,MAP_H=90,PLAYER_SCALE=3,SEASON_DURATION=40;
+const TILE=32,MAP_W=120,MAP_H=90,PLAYER_SCALE=3,SEASON_DURATION=40,DAY_PHASE_DURATION=60,DAY_CYCLE_DURATION=DAY_PHASE_DURATION*4;
 const seasons=[{name:"Primavera",emoji:"🌸"},{name:"Verão",emoji:"☀️"},{name:"Outono",emoji:"🍂"},{name:"Inverno",emoji:"❄️"}];
 let width=0,height=0,dpr=1,last=0,dragging=false,dragOrigin={x:0,y:0},pointerStart={x:0,y:0},moved=false,target=null,mapTick=0,cycleElapsed=81.5,lastSeason=-1,nextRabbitId=1,nextPreyId=1,nextPredatorId=1;
 const keys=new Set(),camera={x:0,y:0},player={x:40*TILE,y:35*TILE,dir:0,frame:0,hop:0,speed:118};
@@ -183,7 +183,7 @@ function updateRabbits(dt){
   const newborns=[];pairAdultRabbits();
   for(const rabbit of rabbits){
     rabbit.age+=dt;rabbit.breedingCooldown=Math.max(0,rabbit.breedingCooldown-dt);rabbit.wanderTimer-=dt;
-    const home=rabbitHome(rabbit),night=nightStrength()>.55;
+    const home=rabbitHome(rabbit),night=isNightTime();
     if(night){rabbit.targetX=home.x;rabbit.targetY=home.y}
     else if(rabbit.wanderTimer<=0)chooseRabbitTarget(rabbit);
     if(rabbit.sex==="female"&&rabbit.pregnancy>0){rabbit.pregnancy-=dt;if(rabbit.pregnancy<=0){const litter=2+Math.floor(rnd(rabbit.id,Math.floor(rabbit.age),19)*3);for(let i=0;i<litter&&rabbits.length+newborns.length<50;i++)newborns.push({home,sex:i%2?"male":"female",x:rabbit.x+(i-1)*2,y:rabbit.y});rabbit.breedingCooldown=35}}
@@ -216,7 +216,7 @@ function pairPrey(){
 function updatePrey(dt){
   const newborns=[];pairPrey();
   for(const animal of preyAnimals){const settings=preySpecies[animal.species],home=preyHome(animal);animal.age+=dt;animal.cooldown=Math.max(0,animal.cooldown-dt);animal.wanderTimer-=dt;
-    const night=nightStrength()>.55,active=settings.activeNight?night:!night;if(!active){animal.targetX=home.x;animal.targetY=home.y}else if(animal.wanderTimer<=0)choosePreyTarget(animal);
+    const night=isNightTime(),active=settings.activeNight?night:!night;if(!active){animal.targetX=home.x;animal.targetY=home.y}else if(animal.wanderTimer<=0)choosePreyTarget(animal);
     if(animal.sex==="female"&&animal.pregnancy>0){animal.pregnancy-=dt;if(animal.pregnancy<=0){const sameSpecies=preyAnimals.filter(candidate=>candidate.species===animal.species).length+newborns.filter(baby=>baby.home.species===animal.species).length,litter=settings.litter[0]+Math.floor(rnd(animal.id,Math.floor(animal.age),28)*(settings.litter[1]-settings.litter[0]+1));for(let i=0;i<litter&&sameSpecies+i<settings.cap;i++)newborns.push({home,sex:i%2?"male":"female",x:animal.x+i,y:animal.y});animal.cooldown=settings.cooldown}}
     const mate=preyAnimals.find(candidate=>candidate.id===animal.mateId);if(animal.sex==="female"&&animal.age>=settings.maturity&&mate&&animal.cooldown<=0&&mate.cooldown<=0&&Math.hypot(animal.x-mate.x,animal.y-mate.y)<45){animal.pregnancy=settings.gestation;animal.cooldown=settings.cooldown;mate.cooldown=settings.cooldown*.8}
     const dx=animal.targetX-animal.x,dy=animal.targetY-animal.y,distance=Math.hypot(dx,dy);animal.hidden=!active;animal.resting=!active&&distance<8;
@@ -250,7 +250,7 @@ function choosePredatorTarget(predator){
 function updatePredators(dt){
   const newborns=[];pairPredators();
   for(const predator of predators){const settings=predatorSpecies[predator.species],home=predatorHome(predator);predator.age+=dt;predator.cooldown=Math.max(0,predator.cooldown-dt);predator.hunger+=dt;predator.wanderTimer-=dt;
-    const night=nightStrength()>.55,active=settings.activeNight?night:!night,canHunt=active&&predator.hunger>18&&preyPopulation(settings.prey)>settings.preyFloor;
+    const night=isNightTime(),active=settings.activeNight?night:!night,canHunt=active&&predator.hunger>18&&preyPopulation(settings.prey)>settings.preyFloor;
     let victim=null;if(canHunt){const candidates=huntablePrey(settings.prey);for(const candidate of candidates)if(!victim||Math.hypot(predator.x-candidate.x,predator.y-candidate.y)<Math.hypot(predator.x-victim.x,predator.y-victim.y))victim=candidate}
     if(victim){predator.targetX=victim.x;predator.targetY=victim.y}else if(!active){predator.targetX=home.x;predator.targetY=home.y}else if(predator.wanderTimer<=0)choosePredatorTarget(predator);
     if(predator.sex==="female"&&predator.pregnancy>0){predator.pregnancy-=dt;if(predator.pregnancy<=0&&predators.filter(item=>item.species===predator.species).length+newborns.filter(item=>item.home.species===predator.species).length<settings.cap){newborns.push({home,sex:rnd(predator.id,Math.floor(predator.age),40)>.5?"male":"female",x:predator.x,y:predator.y});predator.cooldown=settings.cooldown}}
@@ -264,12 +264,23 @@ function updatePredators(dt){
 }
 function resize(){dpr=Math.min(devicePixelRatio,2);width=innerWidth;height=innerHeight;canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false}
 function isVisible(x,y,pad=90){return x>camera.x-pad&&x<camera.x+width+pad&&y>camera.y-pad&&y<camera.y+height+pad}
+function currentWeather(){
+  const tx=Math.max(0,Math.min(MAP_W-1,Math.floor(player.x/TILE))),ty=Math.max(0,Math.min(MAP_H-1,Math.floor(player.y/TILE))),biome=terrain[ty]?.[tx]??0,season=currentSeason(),slot=Math.floor(cycleElapsed/30),chance=rnd(slot,biome+ty*.07,72),cold=ty<21||biome===7,hot=(biome===2||biome===6)&&season!==3&&nightStrength()<.45;
+  if(cold)return chance<.7?{type:"snow",wind:1.4,intensity:.65+chance*.4}:{type:"wind",wind:3.2,intensity:.9};
+  if(season===3&&chance<.58)return{type:"snow",wind:1.2,intensity:.55+chance*.5};
+  if(hot&&chance<.68)return{type:"heat",wind:.55,intensity:.65+chance*.35};
+  if(chance<.27)return{type:"clear",wind:1,intensity:0};
+  if(chance<.5)return{type:"rain",wind:1.7,intensity:.65};
+  if(chance<.69)return{type:"wind",wind:3.5,intensity:.9};
+  if(chance<.86)return{type:"clear",wind:1.15,intensity:0};
+  return{type:"storm",wind:4.4,intensity:1};
+}
 function drawTerrain(){
   const sx=Math.max(0,Math.floor(camera.x/TILE)-1),ex=Math.min(MAP_W,Math.ceil((camera.x+width)/TILE)+1),sy=Math.max(0,Math.floor(camera.y/TILE)-1),ey=Math.min(MAP_H,Math.ceil((camera.y+height)/TILE)+1);
-  const season=currentSeason(),wind=Math.floor(performance.now()/(season===3?500:season===1?190:260));
+  const season=currentSeason(),weather=currentWeather(),wind=Math.floor(performance.now()/((season===3?500:season===1?190:260)/weather.wind));
   for(let y=sy;y<ey;y++)for(let x=sx;x<ex;x++){const type=terrain[y][x],dx=Math.round(x*TILE-camera.x),dy=Math.round(y*TILE-camera.y);ctx.drawImage(sheets.ground[season],type*32,0,32,32,dx,dy,32,32);if(WATER_TILES.has(type)){const shift=Math.floor(performance.now()/(season===3?650:180)+x*3+y*5)%8;ctx.fillStyle=type===5?"#4a86a4":season===3?"#e1f0ef":"#80aca1";ctx.fillRect(dx+shift,dy+8,9,1);ctx.fillRect(dx+(shift+14)%25,dy+23,7,1)}else if(type!==3&&type!==6&&type!==7&&season!==3){const sway=(wind+x+y)%3-1;ctx.fillStyle=season===2?"#8b6238":type===2?"#77763f":type===8?"#496849":"#3c6b3d";ctx.fillRect(dx+8+sway,dy+10,1,5);ctx.fillRect(dx+23-sway,dy+25,1,4)}}
 }
-function drawObject(o){const season=currentSeason(),phase=performance.now()/520+o.x*.017+o.y*.011,wind=season===3?.45:season===1?2.3:1.5,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?wind*1.3:wind)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props[season],o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature[season],o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
+function drawObject(o){const season=currentSeason(),weather=currentWeather(),phase=performance.now()/(520/weather.wind)+o.x*.017+o.y*.011,wind=(season===3?.45:season===1?2.3:1.5)*weather.wind,sway=Math.round(Math.sin(phase)*(o.prop!==undefined?wind*1.3:wind)),x=Math.round(o.x-camera.x),y=Math.round(o.y-camera.y);if(o.prop!==undefined){const lift=o.prop===1?Math.round(Math.sin(phase*1.7)):0;ctx.drawImage(sheets.props[season],o.prop*16,0,16,16,x-16+sway,y-32+lift,32,32)}else{const scale=o.scale||1,w=64*scale,h=96*scale;ctx.fillStyle="#172d2450";ctx.fillRect(x-18*scale,y-5,36*scale,6);ctx.drawImage(sheets.nature[season],o.sprite*32,0,32,48,x-w/2+sway,y-h,w,h)}}
 function drawBurrows(){for(const burrow of burrows){if(!isVisible(burrow.x,burrow.y,25))continue;const x=Math.round(burrow.x-camera.x),y=Math.round(burrow.y-camera.y);ctx.fillStyle="#806043";ctx.fillRect(x-11,y-3,22,6);ctx.fillStyle="#2b2923";ctx.fillRect(x-8,y-4,16,6);ctx.fillStyle="#171b18";ctx.fillRect(x-5,y-3,10,4);ctx.fillStyle="#a47b4c";ctx.fillRect(x-12,y+3,5,2);ctx.fillRect(x+7,y+3,7,2)}}
 function drawPreyHomes(){for(const home of preyHomes){if(!isVisible(home.x,home.y,30))continue;const x=Math.round(home.x-camera.x),y=Math.round(home.y-camera.y);if(home.species==="deer"){ctx.fillStyle="#6f6842";ctx.fillRect(x-15,y-5,30,8);ctx.fillStyle="#958557";ctx.fillRect(x-11,y-7,22,6);ctx.fillStyle="#b09a61";ctx.fillRect(x-7,y-8,14,3)}else if(home.species==="frog"){ctx.fillStyle="#334b35";ctx.fillRect(x-9,y-3,18,6);ctx.fillStyle="#58764a";ctx.fillRect(x-6,y-5,12,4);ctx.fillStyle="#26362c";ctx.fillRect(x-3,y-4,6,3)}else if(home.species==="moth"){ctx.fillStyle="#65442e";ctx.fillRect(x-5,y-12,10,14);ctx.fillStyle="#2a241f";ctx.fillRect(x-3,y-8,6,6);ctx.fillStyle="#8b633b";ctx.fillRect(x-6,y+1,12,3)}else{ctx.fillStyle="#72533c";ctx.fillRect(x-6,y-2,12,4);ctx.fillStyle="#27241f";ctx.fillRect(x-4,y-3,8,4)}}}
 function drawPredatorHomes(){for(const home of predatorHomes){if(!isVisible(home.x,home.y,35))continue;const x=Math.round(home.x-camera.x),y=Math.round(home.y-camera.y);if(home.species==="owl"){ctx.fillStyle="#65442e";ctx.fillRect(x-6,y-16,12,18);ctx.fillStyle="#211f1c";ctx.fillRect(x-4,y-12,8,7)}else if(home.species==="bat"||home.species==="wolf"){ctx.fillStyle="#65655e";ctx.fillRect(x-14,y-6,28,9);ctx.fillStyle="#292a27";ctx.fillRect(x-9,y-8,18,10);ctx.fillStyle="#858279";ctx.fillRect(x-12,y-9,24,4)}else if(home.species==="snake"){ctx.fillStyle="#72694d";ctx.fillRect(x-10,y-3,20,5);ctx.fillStyle="#282822";ctx.fillRect(x-7,y-3,14,2)}else{ctx.fillStyle="#76533a";ctx.fillRect(x-12,y-4,24,7);ctx.fillStyle="#25231f";ctx.fillRect(x-8,y-6,16,8)}}}
@@ -322,12 +333,28 @@ function update(dt){
   updatePredators(dt);
   updateAquaticLife(dt);
 }
-function nightStrength(){const turn=Math.floor(cycleElapsed/10)%2,progress=cycleElapsed%10;return turn===1?Math.min(1,progress/1.5):Math.max(0,1-progress/1.5)}
-function drawNight(){
-  const strength=nightStrength();if(strength<=0)return;
+function dayCycle(){
+  const progress=cycleElapsed%DAY_CYCLE_DURATION,stops=[
+    {at:0,color:[247,183,116],alpha:.16,night:.25},
+    {at:DAY_PHASE_DURATION,color:[255,230,178],alpha:.035,night:0},
+    {at:DAY_PHASE_DURATION*2,color:[236,119,62],alpha:.22,night:.55},
+    {at:DAY_PHASE_DURATION*3,color:[10,22,55],alpha:.38,night:.9},
+    {at:DAY_PHASE_DURATION*3.5,color:[4,10,31],alpha:.46,night:1},
+    {at:DAY_CYCLE_DURATION,color:[247,183,116],alpha:.16,night:.25}
+  ];
+  let from=stops[0],to=stops[1];for(let i=1;i<stops.length;i++)if(progress>=stops[i].at){from=stops[i];to=stops[Math.min(i+1,stops.length-1)]}
+  const amount=to.at===from.at?0:fade((progress-from.at)/(to.at-from.at)),mix=(a,b)=>a+(b-a)*amount;
+  return{color:from.color.map((value,index)=>Math.round(mix(value,to.color[index]))),alpha:mix(from.alpha,to.alpha),night:mix(from.night,to.night)};
+}
+function nightStrength(){return dayCycle().night}
+function isNightTime(){return cycleElapsed%DAY_CYCLE_DURATION>=DAY_CYCLE_DURATION/2}
+function drawAtmosphere(){
+  const daylight=dayCycle(),strength=daylight.night,[red,green,blue]=daylight.color;
+  ctx.fillStyle=`rgba(${red},${green},${blue},${daylight.alpha})`;ctx.fillRect(0,0,width,height);
+  if(strength<=.2)return;
   const px=player.x-camera.x,py=player.y-camera.y;
   const shade=ctx.createRadialGradient(px,py,45,px,py,Math.max(280,Math.min(width,height)*.62));
-  shade.addColorStop(0,`rgba(8,19,42,${.2*strength})`);shade.addColorStop(.35,`rgba(8,18,39,${.44*strength})`);shade.addColorStop(1,`rgba(5,12,31,${.72*strength})`);
+  shade.addColorStop(0,`rgba(8,19,42,${.05*strength})`);shade.addColorStop(.35,`rgba(8,18,39,${.18*strength})`);shade.addColorStop(1,`rgba(5,12,31,${.42*strength})`);
   ctx.fillStyle=shade;ctx.fillRect(0,0,width,height);
   for(let i=0;i<24;i++){const worldX=rnd(i,4,30)*MAP_W*TILE,worldY=rnd(i,9,31)*MAP_H*TILE,x=worldX-camera.x+Math.sin(performance.now()/700+i)*5,y=worldY-camera.y+Math.cos(performance.now()/900+i*2)*3;if(x<0||y<0||x>width||y>height)continue;const flicker=.45+.55*Math.abs(Math.sin(performance.now()/360+i));ctx.fillStyle=`rgba(245,222,111,${strength*flicker})`;ctx.fillRect(Math.round(x),Math.round(y),2,2)}
 }
@@ -340,7 +367,20 @@ function drawSeasonParticles(){
     else{ctx.fillStyle="#f4f7f2cc";ctx.fillRect(Math.round(x+Math.sin(time+i)*7),Math.round(y),2,2)}
   }
 }
-function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();drawAquaticLife();drawBurrows();drawPreyHomes();drawPredatorHomes();const shown=[...objects.filter(o=>isVisible(o.x,o.y)).map(data=>({kind:"object",data})),...rabbits.filter(rabbit=>!rabbit.hidden&&isVisible(rabbit.x,rabbit.y)).map(data=>({kind:"rabbit",data})),...preyAnimals.filter(animal=>!animal.hidden&&isVisible(animal.x,animal.y)).map(data=>({kind:"prey",data})),...predators.filter(predator=>!predator.hidden&&isVisible(predator.x,predator.y)).map(data=>({kind:"predator",data}))].sort((a,b)=>a.data.y-b.data.y);let playerDone=false;for(const item of shown){if(!playerDone&&item.data.y>player.y){drawPlayer();playerDone=true}if(item.kind==="rabbit")drawRabbit(item.data);else if(item.kind==="prey")drawPrey(item.data);else if(item.kind==="predator")drawPredator(item.data);else drawObject(item.data)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawSeasonParticles();drawNight()}
+function drawWeather(){
+  const weather=currentWeather(),time=performance.now()/1000;if(weather.type==="clear")return;
+  if(weather.type==="rain"||weather.type==="storm"){
+    const storm=weather.type==="storm",count=storm?145:85,speed=storm?720:520,slant=storm?18:10;ctx.fillStyle=storm?"rgba(18,28,39,.18)":"rgba(38,67,78,.08)";ctx.fillRect(0,0,width,height);ctx.strokeStyle=storm?"#c8dce2b8":"#a8cbd5a0";ctx.lineWidth=storm?2:1;ctx.beginPath();for(let i=0;i<count;i++){const x=(rnd(i,4,81)*width+time*(storm?250:130)+i*17)%(width+40)-20,y=(rnd(i,9,82)*height+time*speed+i*31)%(height+35)-20;ctx.moveTo(Math.round(x),Math.round(y));ctx.lineTo(Math.round(x-slant),Math.round(y+(storm?24:16)))}ctx.stroke();if(storm&&performance.now()%6500<85){ctx.fillStyle="#e5edf6a8";ctx.fillRect(0,0,width,height)}return;
+  }
+  if(weather.type==="snow"){
+    for(let i=0;i<72;i++){const drift=Math.sin(time*1.4+i)*18,x=(rnd(i,5,83)*width+time*20+drift+i*13)%width,y=(rnd(i,10,84)*height+time*(30+rnd(i,2,85)*30)+i*19)%height,size=i%5===0?3:2;ctx.fillStyle=i%3?"#f5f8f3d8":"#d9e8edc8";ctx.fillRect(Math.round(x),Math.round(y),size,size)}return;
+  }
+  if(weather.type==="wind"){
+    ctx.strokeStyle="#d8dfc570";ctx.lineWidth=1;ctx.beginPath();for(let i=0;i<38;i++){const x=(rnd(i,3,86)*width+time*360+i*29)%(width+120)-60,y=rnd(i,7,87)*height+Math.sin(time*2+i)*18,length=18+rnd(i,8,88)*42;ctx.moveTo(x,y);ctx.lineTo(x+length,y-3)}ctx.stroke();for(let i=0;i<18;i++){const x=(rnd(i,11,89)*width+time*230+i*41)%(width+40)-20,y=(rnd(i,13,90)*height+time*32+i*23)%height;ctx.fillStyle=i%2?"#b56e36":"#78914e";ctx.fillRect(Math.round(x),Math.round(y+Math.sin(time*3+i)*12),3,2)}return;
+  }
+  ctx.fillStyle="rgba(238,153,61,.1)";ctx.fillRect(0,0,width,height);for(let i=0;i<18;i++){const y=(i*47+time*18)%height,x=Math.sin(time*1.7+i)*14;ctx.fillStyle=`rgba(255,220,138,${.025+(i%3)*.012})`;ctx.fillRect(Math.round(x),Math.round(y),width,2)}
+}
+function draw(){ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=false;drawTerrain();drawAquaticLife();drawBurrows();drawPreyHomes();drawPredatorHomes();const shown=[...objects.filter(o=>isVisible(o.x,o.y)).map(data=>({kind:"object",data})),...rabbits.filter(rabbit=>!rabbit.hidden&&isVisible(rabbit.x,rabbit.y)).map(data=>({kind:"rabbit",data})),...preyAnimals.filter(animal=>!animal.hidden&&isVisible(animal.x,animal.y)).map(data=>({kind:"prey",data})),...predators.filter(predator=>!predator.hidden&&isVisible(predator.x,predator.y)).map(data=>({kind:"predator",data}))].sort((a,b)=>a.data.y-b.data.y);let playerDone=false;for(const item of shown){if(!playerDone&&item.data.y>player.y){drawPlayer();playerDone=true}if(item.kind==="rabbit")drawRabbit(item.data);else if(item.kind==="prey")drawPrey(item.data);else if(item.kind==="predator")drawPredator(item.data);else drawObject(item.data)}if(!playerDone)drawPlayer();ctx.fillStyle="#10251d0c";ctx.fillRect(0,0,width,height);drawSeasonParticles();drawAtmosphere();drawWeather()}
 function drawMap(mapContext,mapCanvas,showCamera){
   const mapPalettes=[
     ["#739457","#315f40","#a39b62","#777957","#477f7d","#245d82","#d9c27d","#e4eceb","#577354","#88a95e"],["#879950","#3c673b","#ac995b","#817957","#3f7775","#205a80","#e0c982","#edf2f1","#5d7951","#92ae60"],
